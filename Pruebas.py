@@ -20,10 +20,13 @@ imgpoints = [] # Puntos 2D
 
 # --- CORRECCIÓN DE EXTENSIONES ---
 # Buscamos .jpg, .JPG, .png y .jpeg para asegurar que las pilla todas
+# Ahora buscamos en la subcarpeta "Imagenes calibrador"
+carpeta_imagenes = "Imagenes calibrador"
 extensions = ['*.jpg', '*.JPG', '*.png', '*.jpeg']
 images = []
 for ext in extensions:
-    images.extend(glob.glob(ext))
+    ruta_busqueda = os.path.join(carpeta_imagenes, ext)
+    images.extend(glob.glob(ruta_busqueda))
 
 print(f"--> Se han encontrado {len(images)} imágenes en la carpeta.")
 

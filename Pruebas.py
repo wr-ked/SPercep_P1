@@ -64,4 +64,59 @@ for fname in images:
         print(f"FALLO: No se detectó el patrón 9x6 en {fname}")
 
 cv.destroyAllWindows()
+
+# --- CALIBRACIÓN DE LA CÁMARA ---
+if len(objpoints) > 0 and len(imgpoints) > 0:
+    print(f"\n--- CALIBRACIÓN CON {len(objpoints)} IMÁGENES ---")
+    
+    # Obtener dimensiones de imagen (usar la última imagen válida)
+    img = cv.imread(images[0])
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    
+    # Calibrar la cámara
+    ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+    
+    if ret:
+        print("\n=== MATRIZ DE PARÁMETROS INTRÍNSECOS (M) ===")
+        print("Matriz de cámara:")
+        print(mtx)
+        print(f"\nDistancia focal fx: {mtx[0,0]:.2f}")
+        print(f"Distancia focal fy: {mtx[1,1]:.2f}")
+        print(f"Centro óptico cx: {mtx[0,2]:.2f}")
+        print(f"Centro óptico cy: {mtx[1,2]:.2f}")
+        
+        print("\nCoeficientes de distorsión:")
+        print(dist.ravel())
+        
+        print("\n=== PARÁMETROS EXTRÍNSECOS PARA CADA IMAGEN ===")
+        for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
+            print(f"\n--- IMAGEN {i+1} ---")
+            
+            # Convertir vector de rotación a matriz de rotación
+            R, _ = cv.Rodrigues(rvec)
+            
+            print("Matriz de rotación R:")
+            print(R)
+            
+            print("Vector de traslación T:")
+            print(tvec.ravel())
+            
+            # Matriz de transformación completa 4x4
+            T = np.eye(4)
+            T[:3, :3] = R
+            T[:3, 3] = tvec.ravel()
+            
+            print("Matriz de transformación completa T (4x4):")
+            print(T)
+        
+        print(f"\n=== RESUMEN DE CALIBRACIÓN ===")
+        print(f"Error de reproyección RMS: {ret:.6f}")
+        print(f"Imágenes utilizadas: {len(objpoints)}")
+        
+    else:
+        print("ERROR: Fallo en la calibración de la cámara")
+else:
+    print("ERROR: No se encontraron suficientes patrones válidos para calibrar")
+
+print("Proceso finalizado.")
 print("Proceso finalizado.")

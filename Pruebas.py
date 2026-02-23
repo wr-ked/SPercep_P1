@@ -21,7 +21,7 @@ imgpoints = [] # Puntos 2D
 # --- CORRECCIÓN DE EXTENSIONES ---
 # Buscamos .jpg, .JPG, .png y .jpeg para asegurar que las pilla todas
 # Ahora buscamos en la subcarpeta "Imagenes calibrador"
-carpeta_imagenes = "Imagenes calibrador"
+carpeta_imagenes = "Calibration_Images"
 extensions = ['*.jpg', '*.JPG', '*.png', '*.jpeg']
 images = []
 for ext in extensions:

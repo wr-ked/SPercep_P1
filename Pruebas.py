@@ -119,4 +119,68 @@ else:
     print("ERROR: No se encontraron suficientes patrones válidos para calibrar")
 
 print("Proceso finalizado.")
-print("Proceso finalizado.")
+
+def captura_video_en_vivo(mtx, dist):
+    """
+    Captura video en vivo y detecta el patrón de calibración
+    mtx: matriz de parámetros intrínsecos
+    dist: coeficientes de distorsión
+    """
+    # Inicializar la cámara (0 es la cámara por defecto)
+    cap = cv.VideoCapture(0)
+    
+    # Verificar si la cámara se abrió correctamente
+    if not cap.isOpened():
+        print("ERROR: No se puede abrir la cámara")
+        return
+    
+    print("Presiona 'q' para salir del video")
+    print("Presiona 'c' para capturar una imagen")
+    
+    while True:
+        # Capturar frame
+        ret, frame = cap.read()
+        
+        if not ret:
+            print("ERROR: No se puede recibir frame de la cámara")
+            break
+        
+        # Convertir a escala de grises
+        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        
+        # Buscar el patrón de calibración
+        ret_pattern, corners = cv.findChessboardCorners(gray, (FILAS, COLUMNAS), None)
+        
+        # Si se encuentra el patrón
+        if ret_pattern:
+            # Refinar las esquinas
+            corners2 = cv.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
+            
+            # Dibujar las esquinas
+            cv.drawChessboardCorners(frame, (FILAS, COLUMNAS), corners2, ret_pattern)
+            
+            # Mostrar texto indicando que se detectó el patrón
+            cv.putText(frame, 'Patron detectado', (10, 30), 
+                      cv.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            # Mostrar texto indicando que no se detectó
+            cv.putText(frame, 'Buscando patron...', (10, 30), 
+                      cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        # Mostrar el frame
+        cv.imshow('Video en vivo - Deteccion de patron', frame)
+        
+        # Verificar teclas presionadas
+        key = cv.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('c'):
+            # Capturar imagen actual
+            cv.imwrite('captura_actual.jpg', frame)
+            print("Imagen capturada como 'captura_actual.jpg'")
+    
+    # Liberar recursos
+    cap.release()
+    cv.destroyAllWindows()
+
+captura_video_en_vivo(mtx, dist)

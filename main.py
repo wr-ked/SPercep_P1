@@ -7,18 +7,60 @@ import glob
 import os
 
 
-def chessboard_calibration(): 
-   return None
+def chessboard_calibration():
 
+    # Dimensiones del patrón de ajedrez
+    filas = 9
+    columnas = 6
+
+    # Criterio de terminación
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_INTER, 30, 0.001)  # 
+    
+    # Preparar puntos de objeto.
+    objp = np.zeros((filas*columnas, 3), np.float32)
+    objp[:,:2] = np.mgrid[0:filas, 0:columnas].T.reshape(-1,2)
+
+    objpoints = [] # Puntos 3D
+    imgpoints = [] # Puntos 2D
+
+    # Buscar imágenes en la carpeta "Chess_Calibration_Images". Si etsa vacia abre la camara para hacer la calibracion en vivo.
+    carpeta_imagenes = "Chess_Calibration_Images"
+    extensions = ['*.jpg', '*.JPG', '*.png', '*.jpeg']
+    images = []
+    for ext in extensions:
+        ruta_busqueda = os.path.join(carpeta_imagenes, ext)
+        images.extend(glob.glob(ruta_busqueda))
+
+    if len(images) == 0:
+        print("No se encontraron imágenes de calibración. Abriendo cámara para calibración en vivo...")
+        calibration_image_captures()
+        return None, None
+    
+    for fname in images:
+        img = cv.imread(fname)
+        if img is None
+            print(f"Error leyendo {fname}")
+            continue
+    
+    # Escala de grises para la detección de esquinas
+    gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+    # Buscar esquinas con las dimensiones correctas (9x6)
+    ret, corners = cv.findChessboardCorners(gray, (filas, columnas), None
+    
 def aruco_calibration():
     return None
 
 def charuco_calibration():
     return None
 
-def live_proyection():
+def live_projection():
     return None
-   
+
+def calibration_image_captures():       # TODO: Implementar esta función para capturar imágenes de calibración en vivo si no se encuentran imágenes en la carpeta.
+    return None
+
+
 
 def main():
     print("=== PRÁCTICA 1: CALIBRACIÓN Y REALIDAD AUMENTADA ===")

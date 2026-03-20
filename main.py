@@ -7,11 +7,7 @@ import glob
 import os
 import time
 import argparse
-
-try:
-    import open3d as o3d
-except ImportError:
-    o3d = None
+import open3d as o3d
 
 
 # Parametros globales
@@ -280,11 +276,21 @@ def live_projection(mtx, dist, objp, puntos_modelo):
     cv.destroyAllWindows()
 
 
-def main(show_intrinsic=False, show_extrinsic=False):
+def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=False):
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
 
-    print("\nRealizando calibracion con patron de ajedrez...")
-    ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+    print(f"\nRealizando calibracion con tipo: {calibration_type.upper()}...")
+    
+    # Seleccionar funcion de calibracion segun el tipo
+    if calibration_type == "chessboard":
+        ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+    elif calibration_type == "aruco":
+        ret, mtx, dist, rvecs, tvecs = aruco_calibration()
+    elif calibration_type == "charuco":
+        ret, mtx, dist, rvecs, tvecs = charuco_calibration()
+    else:
+        print(f"Tipo de calibracion desconocido: {calibration_type}")
+        return
 
     # Si el error de reproyeccion es alto, intentamos capturar nuevas imagenes y recalibrar
     reintentos = 0
@@ -308,7 +314,13 @@ def main(show_intrinsic=False, show_extrinsic=False):
             break
 
         print("Recalculando calibracion con las nuevas imagenes...")
-        ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+        # Recalibrar usando el mismo tipo de calibracion
+        if calibration_type == "chessboard":
+            ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+        elif calibration_type == "aruco":
+            ret, mtx, dist, rvecs, tvecs = aruco_calibration()
+        elif calibration_type == "charuco":
+            ret, mtx, dist, rvecs, tvecs = charuco_calibration()
 
     if mtx is not None and ret > RMS_UMBRAL_ALTO:
         print(
@@ -370,14 +382,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Calibracion de camara y proyeccion 3D a 2D",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Ejemplos de uso:
-  python main.py                                    # Ejecutar sin mostrar matrices
-  python main.py -I                                 # Mostrar matriz intrinseca
-  python main.py -E                                 # Mostrar matriz extrinseica
-  python main.py -I -E                              # Mostrar ambas matrices
-  python main.py --show-intrinsic --show-extrinsic # Equivalente al anterior
-        """
+        epilog="Ejemplos de uso:\n  python main.py -c chessboard                       # Calibrar con patrón de ajedrez\n  python main.py -c aruco                            # Calibrar con marcadores ArUco\n  python main.py -c charuco                          # Calibrar con patrón ChArUco\n  python main.py -c chessboard -I                    # Con matriz intrínseca\n  python main.py -c chessboard -E                    # Con matrices extrínsecas\n  python main.py -c chessboard -I -E                 # Con ambas matrices"
+    )
+    parser.add_argument(
+        "-c", "--calibration-type",
+        type=str,
+        choices=["chessboard", "aruco", "charuco"],
+        required=True,
+        help="Tipo de patron de calibracion a utilizar (obligatorio)"
     )
     parser.add_argument(
         "-I", "--show-intrinsic",
@@ -391,4 +403,8 @@ Ejemplos de uso:
     )
     
     args = parser.parse_args()
-    main(show_intrinsic=args.show_intrinsic, show_extrinsic=args.show_extrinsic)
+    main(
+        calibration_type=args.calibration_type,
+        show_intrinsic=args.show_intrinsic,
+        show_extrinsic=args.show_extrinsic
+    )

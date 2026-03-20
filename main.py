@@ -20,7 +20,7 @@ CHARUCO_FILAS = 6
 CHARUCO_COLUMNAS = 9
 CHARUCO_TAM_CUADRADO = 0.026 # 26 mm en metros
 CHARUCO_TAM_MARCADOR = 0.019  # 19 mm en metros
-
+ARUCO_TAM_MARCADOR = 0.10
 # Otros parametros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 RMS_UMBRAL_ALTO = 808
@@ -193,8 +193,79 @@ def chessboard_calibration():
 
 
 def aruco_calibration():
-    return None
+    """Realiza la calibracion usando un unico marcador ArUco y devuelve los parametros."""
+    print("\nIniciando calibracion con un unico marcador ArUco...")
+    
+    # Configuramos el detector (usamos diccionario 4x4 porque tu foto es de ese tipo)
+    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
+    detector_params = cv.aruco.DetectorParameters()
+    detector = cv.aruco.ArucoDetector(dictionary, detector_params)
 
+    # Definimos las 4 esquinas 3D de un solo marcador centrado en el origen (0,0,0)
+    # Orden de OpenCV: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+    L = ARUCO_TAM_MARCADOR / 2.0
+    marker_3d = np.array([
+        [-L,  L, 0],
+        [ L,  L, 0],
+        [ L, -L, 0],
+        [-L, -L, 0]
+    ], dtype=np.float32)
+
+    all_obj_points = []
+    all_img_points = []
+    image_size = None
+
+    # Pon la carpeta donde tengas las fotos de este marcador individual
+    carpeta_imagenes = "Calibracion_Aruco_Diego" 
+    os.makedirs(carpeta_imagenes, exist_ok=True)
+
+    images = []
+    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+        images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
+
+    if len(images) == 0:
+        print(f"Error: La carpeta '{carpeta_imagenes}' esta vacia.")
+        return None, None, None, None, None
+
+    print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
+
+    for fname in images:
+        img = cv.imread(fname)
+        if img is None:
+            continue
+        
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+        if image_size is None:
+            image_size = gray.shape[::-1]
+
+        # Detectar el marcador
+        corners, ids, rejected = detector.detectMarkers(gray)
+
+        if ids is not None and len(ids) > 0:
+            # Usamos el primer marcador que encuentre (corners[0])
+            # corners[0] tiene forma (1, 4, 2), extraemos las 4 esquinas 2D
+            esquinas_2d = corners[0][0]
+            
+            all_obj_points.append(marker_3d)
+            all_img_points.append(esquinas_2d)
+            print(f"Marcador detectado en {fname}")
+        else:
+            print(f"Descartada {fname}: no se detecto el marcador")
+
+    if len(all_obj_points) == 0:
+        print("No se encontraron marcadores validos en las imagenes.")
+        return None, None, None, None, None
+
+    print("\nCalculando parametros de calibracion...")
+    try:
+        ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
+            all_obj_points, all_img_points, image_size, None, None
+        )
+        return ret, mtx, dist, rvecs, tvecs
+    except Exception as e:
+        print(f"Error durante el calculo: {e}")
+        return None, None, None, None, None
+    
 def charuco_calibration():
     """Realiza la calibracion usando un tablero ChArUco desde una carpeta y devuelve los parametros."""
     print("\nIniciando calibracion con ChArUco...")
@@ -339,8 +410,8 @@ def load_pcd_model(ruta_pcd, escala=1.0):
         print(f"No se pudo cargar el modelo PCD ({ruta_pcd}): {e}")
         return None
 
-
-def live_projection(mtx, dist, objp, puntos_modelo):
+def live_projection(mtx, dist, puntos_modelo):
+    """Proyeccion en vivo sobre un unico marcador ArUco."""
     cap = cv.VideoCapture(0)
     if not cap.isOpened():
         print("No se puede abrir la camara")
@@ -348,55 +419,56 @@ def live_projection(mtx, dist, objp, puntos_modelo):
 
     print("Presiona 'q' para cerrar la proyeccion en vivo")
 
-    # --- VARIABLES PARA OPTIMIZACIÓN ---
-    frame_count = 0
-    skip_rate = 6  # Si no hay patrón, solo busca cada 6 frames (~5 veces por segundo)
-    patron_detectado = False 
+    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
+    detector = cv.aruco.ArucoDetector(dictionary, cv.aruco.DetectorParameters())
+
+    # Las mismas 4 esquinas 3D que usamos para calibrar
+    L = ARUCO_TAM_MARCADOR / 2.0
+    marker_3d = np.array([
+        [-L,  L, 0],
+        [ L,  L, 0],
+        [ L, -L, 0],
+        [-L, -L, 0]
+    ], dtype=np.float32)
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
-        frame_count += 1
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-        # Solo buscamos si el patrón estaba presente o si toca por el contador de saltos
-        debe_buscar = patron_detectado or (frame_count % skip_rate == 0)
+        # Detectar el marcador
+        corners, ids, rejected = detector.detectMarkers(gray)
 
-        if debe_buscar:
-            # CALIB_CB_FAST_CHECK hace una pasada rápida y aborta si no ve un tablero
-            flags_opt = cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_FAST_CHECK + cv.CALIB_CB_NORMALIZE_IMAGE
-            ret_pattern, corners = cv.findChessboardCorners(gray, (COLUMNAS, FILAS), flags=flags_opt)
+        if ids is not None and len(ids) > 0:
+            cv.aruco.drawDetectedMarkers(frame, corners, ids)
 
-            if ret_pattern:
-                patron_detectado = True # Mantenemos FPS altos
-                corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM_CRITERIA)
-                ret_pnp, rvec, tvec = cv.solvePnP(objp, corners2, mtx, dist)
+            # Tomamos las esquinas del primer marcador detectado
+            esquinas_2d = corners[0][0]
 
-                if ret_pnp and puntos_modelo is not None:
-                    imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
-                    for pt in imgpts:
-                        x, y = int(pt[0][0]), int(pt[0][1])
-                        if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-                            cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+            # Calculamos la pose de la camara respecto al marcador
+            ret_pnp, rvec, tvec = cv.solvePnP(marker_3d, esquinas_2d, mtx, dist)
 
-            else:
-                patron_detectado = False # Si no se detecta, entramos en modo ahorro de CPU
-                cv.putText(frame, "Buscando patron", (10, 30), 
-                           cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            if ret_pnp and puntos_modelo is not None:
+                # Proyectar el modelo
+                imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
+                
+                for pt in imgpts:
+                    x, y = int(pt[0][0]), int(pt[0][1])
+                    if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                        cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+
         else:
-            # En los frames saltados, mantenemos el feedback visual
-            cv.putText(frame, "Buscando patron", (10, 30), 
+            cv.putText(frame, "Buscando marcador ArUco...", (10, 30), 
                        cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        cv.imshow("Realidad Aumentada PCD", frame)
+        cv.imshow("Realidad Aumentada ArUco", frame)
         if cv.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv.destroyAllWindows()
-
 
 def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=False):
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
@@ -490,12 +562,27 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
         print("\n=== RESUMEN DE CALIBRACION ===")
         print(f"Error de reproyeccion RMS: {ret:.6f}")
         print(f"Imagenes utilizadas: {len(rvecs)}")
-
         print("\nPreparando proyeccion en vivo...")
-        objp = build_object_points(centered=True)
-        escala_modelo = 0.05 * TAM_CUADRADO
+        
+        # Ajustamos la escala (juega con este 0.05 si sale muy grande o pequeño)
+        escala_modelo = 0.005 * ARUCO_TAM_MARCADOR 
         puntos_pcd = load_pcd_model("ninetales_voxelizado.pcd", escala=escala_modelo)
-        live_projection(mtx, dist, objp, puntos_pcd)
+        if puntos_pcd is not None:
+            # --- ROTACIÓN PARA DARLE LA VUELTA ---
+            # Definimos el ángulo (180 grados en radianes)
+            theta = np.radians(180)
+            
+            # Matriz de rotación sobre el eje Z (para que gire sobre el marcador)
+            # Si quieres que gire hacia adelante/atrás, usa una matriz sobre X o Y
+            Rx = np.array([
+                [1, 0, 0],
+                [0, np.cos(theta), -np.sin(theta)],
+                [0, np.sin(theta),  np.cos(theta)]
+            ], dtype=np.float32)
+            puntos_pcd = puntos_pcd @ Rx.T
+            print("Modelo rotado 180 grados correctamente.")
+        # Solo le pasamos la matriz, la distorsion y el modelo 3D
+        live_projection(mtx, dist, puntos_pcd)
     else:
         print("No se puede continuar sin calibracion valida")
 

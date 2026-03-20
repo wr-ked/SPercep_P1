@@ -13,15 +13,22 @@ except ImportError:
     o3d = None
 
 
-# Parametros globales
+# Parametros globales originales (Chessboard)
 FILAS = 9
 COLUMNAS = 6
 TAM_CUADRADO = 0.02  # metros
+
+# Nuevos parametros globales (ChArUco)
+CHARUCO_FILAS = 6
+CHARUCO_COLUMNAS = 9
+CHARUCO_TAM_CUADRADO = 0.026 # 26 mm en metros
+CHARUCO_TAM_MARCADOR = 0.019  # 19 mm en metros
+
+# Otros parametros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 RMS_UMBRAL_ALTO = 0.8
 CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
-
 
 def build_object_points(centered=True):
     """Genera los puntos 3D del tablero sobre Z=0."""
@@ -191,9 +198,124 @@ def chessboard_calibration():
 def aruco_calibration():
     return None
 
-
 def charuco_calibration():
-    return None
+    """Realiza la calibracion usando un tablero ChArUco desde una carpeta y devuelve los parametros."""
+    print("\nIniciando calibracion con ChArUco...")
+    
+    # Manejar las diferencias de versiones de la API de OpenCV (pre y post 4.7/4.8)
+    # Manejar las diferencias de versiones de la API de OpenCV (pre y post 4.7/4.8)
+    try:
+        # API de OpenCV MODERNA (>= 4.8)
+        dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
+        
+        # IMPORTANTE: Viendo tu foto apaisada, asegúrate de que arriba del todo en tu código 
+        # tienes puesto CHARUCO_COLUMNAS = 9 y CHARUCO_FILAS = 6
+        board = cv.aruco.CharucoBoard((CHARUCO_COLUMNAS, CHARUCO_FILAS), CHARUCO_TAM_CUADRADO, CHARUCO_TAM_MARCADOR, dictionary)
+        
+        # --- LA SOLUCIÓN AL PROBLEMA DE CALIB.IO ---
+        # Le decimos a OpenCV que lea el tablero con el formato antiguo
+        board.setLegacyPattern(True) 
+        # ---------------------------------------------
+        
+        charuco_detector = cv.aruco.CharucoDetector(board)
+        old_api = False
+    except AttributeError:
+        # API de OpenCV ANTIGUA (< 4.7)
+        dictionary = cv.aruco.Dictionary_get(cv.aruco.DICT_4X4_250)
+        board = cv.aruco.CharucoBoard_create(CHARUCO_COLUMNAS, CHARUCO_FILAS, CHARUCO_TAM_CUADRADO, CHARUCO_TAM_MARCADOR, dictionary)
+        detector_params = cv.aruco.DetectorParameters_create()
+        old_api = True
+
+    all_charuco_corners = []
+    all_charuco_ids = []
+    all_obj_points = []
+    all_img_points = []
+    image_size = None
+
+    # Pon aqui el nombre de tu carpeta de fotos
+    carpeta_imagenes = "Calibration_Charuco_Diego" 
+
+    images = []
+    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+        images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
+
+    if len(images) == 0:
+        print(f"Error: La carpeta '{carpeta_imagenes}' esta vacia o no existe.")
+        return None, None, None, None, None
+
+    print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
+
+    for fname in images:
+        img = cv.imread(fname)
+        if img is None:
+            continue
+        
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+        if image_size is None:
+            image_size = gray.shape[::-1]
+
+        if not old_api:
+            # === NUEVA FORMA DE DETECTAR ===
+            # detectBoard encuentra los marcadores y saca las esquinas ChArUco de golpe
+            charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+            
+            if charuco_corners is not None and charuco_ids is not None and len(charuco_corners) >= 4:
+                all_charuco_corners.append(charuco_corners)
+                all_charuco_ids.append(charuco_ids)
+                
+                # Extraemos los puntos 3D (obj) y 2D (img) para pasarlos al calibrador
+                obj_points, img_points = board.matchImagePoints(charuco_corners, charuco_ids)
+                if obj_points is not None and img_points is not None:
+                    all_obj_points.append(obj_points)
+                    all_img_points.append(img_points)
+
+                print(f"ChArUco valido en {fname} ({len(charuco_corners)} esquinas)")
+            else:
+                print(f"Descartada {fname}: no hay suficientes esquinas ChArUco")
+                
+        else:
+            # === ANTIGUA FORMA DE DETECTAR ===
+            corners, ids, rejected = cv.aruco.detectMarkers(gray, dictionary, parameters=detector_params)
+
+            if ids is not None and len(ids) > 0:
+                ret, charuco_corners, charuco_ids = cv.aruco.interpolateCornersCharuco(corners, ids, gray, board)
+
+                if charuco_corners is not None and charuco_ids is not None and len(charuco_corners) >= 4:
+                    all_charuco_corners.append(charuco_corners)
+                    all_charuco_ids.append(charuco_ids)
+                    print(f"ChArUco valido en {fname} ({len(charuco_corners)} esquinas interpoladas)")
+                else:
+                    print(f"Descartada {fname}: no hay suficientes esquinas ChArUco")
+            else:
+                print(f"Descartada {fname}: no se detecto ningun marcador")
+
+    if len(all_charuco_corners) == 0:
+        print("No se encontraron tableros validos en ninguna de las imagenes proporcionadas.")
+        return None, None, None, None, None
+
+    # 3. Calibrar la camara
+    print("\nCalculando parametros de calibracion...")
+    try:
+        if not old_api:
+            # Calibracion estandar de OpenCV usando los puntos extraidos del tablero
+            ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
+                all_obj_points, all_img_points, image_size, None, None
+            )
+        else:
+            # Funcion deprecada en versiones nuevas, pero necesaria en las antiguas
+            ret, mtx, dist, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(
+                charucoCorners=all_charuco_corners,
+                charucoIds=all_charuco_ids,
+                board=board,
+                imageSize=image_size,
+                cameraMatrix=None,
+                distCoeffs=None
+            )
+        return ret, mtx, dist, rvecs, tvecs
+        
+    except Exception as e:
+        print(f"Error durante el calculo matematico: {e}")
+        return None, None, None, None, None
 
 
 def load_pcd_model(ruta_pcd, escala=1.0):
@@ -282,8 +404,8 @@ def live_projection(mtx, dist, objp, puntos_modelo):
 def main():
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
 
-    print("\nRealizando calibracion con patron de ajedrez...")
-    ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+    print("\nRealizando calibracion con patron ChArUco...") ### <--- CAMBIO 1 (Texto)
+    ret, mtx, dist, rvecs, tvecs = charuco_calibration() ### <--- CAMBIO 2 (Llamada a la funcion)
 
     # Si el error de reproyeccion es alto, intentamos capturar nuevas imagenes y recalibrar
     reintentos = 0

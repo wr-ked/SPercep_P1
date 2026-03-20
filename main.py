@@ -6,6 +6,7 @@ import cv2 as cv
 import glob
 import os
 import time
+import argparse
 
 try:
     import open3d as o3d
@@ -279,7 +280,7 @@ def live_projection(mtx, dist, objp, puntos_modelo):
     cv.destroyAllWindows()
 
 
-def main():
+def main(show_intrinsic=False, show_extrinsic=False):
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
 
     print("\nRealizando calibracion con patron de ajedrez...")
@@ -317,35 +318,40 @@ def main():
     # Mostrar resultados de calibracion
     if mtx is not None:
         print("\nCalibracion exitosa")
-        print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")
-        print("Matriz de camara:")
-        print(mtx)
-        print(f"\nDistancia focal fx: {mtx[0,0]:.2f}")
-        print(f"Distancia focal fy: {mtx[1,1]:.2f}")
-        print(f"Centro optico cx: {mtx[0,2]:.2f}")
-        print(f"Centro optico cy: {mtx[1,2]:.2f}")
+        
+        # Mostrar parametros intrinsecos si se solicita
+        if show_intrinsic:
+            print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")
+            print("Matriz de camara:")
+            print(mtx)
+            print(f"\nDistancia focal fx: {mtx[0,0]:.2f}")
+            print(f"Distancia focal fy: {mtx[1,1]:.2f}")
+            print(f"Centro optico cx: {mtx[0,2]:.2f}")
+            print(f"Centro optico cy: {mtx[1,2]:.2f}")
 
-        print("\nCoeficientes de distorsion:")
-        print(dist.ravel())
+            print("\nCoeficientes de distorsion:")
+            print(dist.ravel())
 
-        print("\n=== PARAMETROS EXTRINSECOS PARA CADA IMAGEN ===")
-        for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
-            print(f"\n--- IMAGEN {i+1} ---")
+        # Mostrar parametros extrinsecos si se solicita
+        if show_extrinsic:
+            print("\n=== PARAMETROS EXTRINSECOS PARA CADA IMAGEN ===")
+            for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
+                print(f"\n--- IMAGEN {i+1} ---")
 
-            R, _ = cv.Rodrigues(rvec)
+                R, _ = cv.Rodrigues(rvec)
 
-            print("Matriz de rotacion R:")
-            print(R)
+                print("Matriz de rotacion R:")
+                print(R)
 
-            print("Vector de traslacion T:")
-            print(tvec.ravel())
+                print("Vector de traslacion T:")
+                print(tvec.ravel())
 
-            T = np.eye(4)
-            T[:3, :3] = R
-            T[:3, 3] = tvec.ravel()
+                T = np.eye(4)
+                T[:3, :3] = R
+                T[:3, 3] = tvec.ravel()
 
-            print("Matriz de transformacion completa T (4x4):")
-            print(T)
+                print("Matriz de transformacion completa T (4x4):")
+                print(T)
 
         print("\n=== RESUMEN DE CALIBRACION ===")
         print(f"Error de reproyeccion RMS: {ret:.6f}")
@@ -361,4 +367,28 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Calibracion de camara y proyeccion 3D a 2D",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Ejemplos de uso:
+  python main.py                                    # Ejecutar sin mostrar matrices
+  python main.py -I                                 # Mostrar matriz intrinseca
+  python main.py -E                                 # Mostrar matriz extrinseica
+  python main.py -I -E                              # Mostrar ambas matrices
+  python main.py --show-intrinsic --show-extrinsic # Equivalente al anterior
+        """
+    )
+    parser.add_argument(
+        "-I", "--show-intrinsic",
+        action="store_true",
+        help="Mostrar matriz de parametros intrinsecos"
+    )
+    parser.add_argument(
+        "-E", "--show-extrinsic",
+        action="store_true",
+        help="Mostrar matriz de parametros extrinsecos para cada imagen"
+    )
+    
+    args = parser.parse_args()
+    main(show_intrinsic=args.show_intrinsic, show_extrinsic=args.show_extrinsic)

@@ -103,7 +103,7 @@ def cargar_modelo(ruta_pcd, escala=1.0):
 
 # Definimos el factor de escala (hay que ajustarlo probando)
 ESCALA_MODELO = 0.05
-puntos_pcd = cargar_modelo("ninetales_centrado.pcd", escala=ESCALA_MODELO*tam_cuadrado)
+puntos_pcd = cargar_modelo("ninetales_voxelizado.pcd", escala=ESCALA_MODELO*tam_cuadrado)
 
 # puntos_modelo = crear_linea_horizontal(num_puntos=50)
 

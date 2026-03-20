@@ -1,32 +1,54 @@
 import open3d as o3d
 import numpy as np
+import os
 
-# 1. Cargar la nube de puntos
-nombre_archivo = "ninetales_invertido.pcd"
-pcd = o3d.io.read_point_cloud(nombre_archivo)
+def simplificar_pcd(ruta_entrada, ruta_salida, tamano_voxel):
+    # 1. Comprobar que el archivo existe
+    if not os.path.exists(ruta_entrada):
+        print(f"ERROR: No se encuentra el archivo '{ruta_entrada}'")
+        return
 
-# 2. Obtener las coordenadas
-points = np.asarray(pcd.points)
+    print(f"Cargando modelo original: {ruta_entrada}...")
+    
+    # 2. Leer la nube de puntos original
+    pcd = o3d.io.read_point_cloud(ruta_entrada)
+    puntos_originales = len(pcd.points)
+    print(f"--> Puntos antes del filtro: {puntos_originales}")
 
-# 3. Calcular los límites (bounding box)
-min_bound = points.min(axis=0)
-max_bound = points.max(axis=0)
-# 4. Calcular el centro en X e Y
-center_x = (min_bound[0] + max_bound[0]) / 2.0
-center_y = (min_bound[1] + max_bound[1]) / 2.0
+    if puntos_originales == 0:
+        print("ERROR: El modelo está vacío o no se pudo leer correctamente.")
+        return
 
-# Como el modelo está invertido y la cabeza era el mínimo, 
-# la base (los pies) debe ser el valor MÁXIMO del eje Z.
-base_z = max_bound[2] 
+    # 3. Aplicar el filtro Voxel Grid
+    print(f"Aplicando Voxel Grid con tamaño: {tamano_voxel}...")
+    pcd_filtrado = pcd.voxel_down_sample(voxel_size=tamano_voxel)
+    puntos_nuevos = len(pcd_filtrado.points)
+    
+    print(f"--> Puntos después del filtro: {puntos_nuevos}")
+    
+    # Calcular porcentaje de reducción
+    reduccion = (1 - (puntos_nuevos / puntos_originales)) * 100
+    print(f"--> Se ha reducido la cantidad de puntos en un {reduccion:.2f}%")
 
-# 5. Calcular el vector de traslación para mover LA BASE al origen
-translation = np.array([-center_x, -center_y, -base_z])
+    # 4. Guardar el nuevo modelo optimizado
+    o3d.io.write_point_cloud(ruta_salida, pcd_filtrado)
+    print(f"\n¡Éxito! Nuevo modelo guardado en: {ruta_salida}")
 
-# 6. Aplicar la traslación a la nube de puntos
-pcd.translate(translation)
+    # 5. Opcional: Visualizar el resultado
+    # Descomenta la siguiente línea si quieres que se abra una ventana 3D para ver cómo quedó
+    # o3d.visualization.draw_geometries([pcd_filtrado], window_name="Modelo Voxelizado")
 
-# 7. Guardar el nuevo archivo
-nuevo_archivo = "ninetales_centrado.pcd"
-o3d.io.write_point_cloud(nuevo_archivo, pcd)
+# --- CONFIGURACIÓN ---
+# Nombre de tu archivo original
+archivo_original = "ninetales_centrado.pcd"
 
-print(f"¡Listo! Archivo guardado como {nuevo_archivo}")
+# Nombre del nuevo archivo más ligero que vas a generar
+archivo_optimizado = "ninetales_voxelizado.pcd"
+
+# Ajusta este valor. 
+# Si el modelo original está en milímetros o es muy grande, quizás necesites 1.0, 5.0, etc.
+# Si el modelo está normalizado cerca de 1.0, valores como 0.01 o 0.05 son mejores.
+TAMAÑO_VOXEL = 4
+
+# Ejecutar la función
+simplificar_pcd(archivo_original, archivo_optimizado, TAMAÑO_VOXEL)

@@ -30,11 +30,43 @@ El flujo seguido es:
 
 4. Evaluacion de calidad mediante error de reproyeccion RMS.
 
+### Modos disponibles
+
+El script permite elegir de forma obligatoria el tipo de calibracion con el flag `-c`:
+
+- Chessboard
+- ArUco
+- ChArUco
+
+Ejemplos:
+
+```bash
+python main.py -c chessboard
+python main.py -c aruco
+python main.py -c charuco
+python main.py -c charuco -I -E
+```
+
+Donde:
+
+- `-I` muestra parametros intrinsecos.
+- `-E` muestra parametros extrinsecos.
+
+### Carpetas de calibracion
+
+Para evitar mezclar datasets, cada patron usa su propia carpeta de imagenes:
+
+- Chessboard: `CalibrationImagesChessboard`
+- ArUco: `CalibrationImagesAruco`
+- ChArUco: `CalibrationImagesCharuco`
+
 Criterio de calidad usado:
 
 - RMS < 0.8: calibracion aceptable (error medio menor que 1 pixel).
 
 - RMS < 0.5: calibracion optima.
+
+Ademas, si el RMS supera el umbral configurado, el sistema puede repetir automaticamente la captura y recalibrar para mejorar la calidad.
 
 ## Experimentacion
 

@@ -5,6 +5,7 @@ import numpy as np
 import cv2 as cv
 import glob
 import os
+import time
 
 try:
     import open3d as o3d
@@ -17,6 +18,9 @@ FILAS = 9
 COLUMNAS = 6
 TAM_CUADRADO = 0.02  # metros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+RMS_UMBRAL_ALTO = 0.8
+CAPTURAS_REINTENTO = 20
+MAX_REINTENTOS_RMS = 3
 
 
 def build_object_points(centered=True):
@@ -32,12 +36,92 @@ def build_object_points(centered=True):
     return objp
 
 
-def calibration_image_captures():
-    # TODO: Implementar esta funcion para capturar imagenes en vivo.
-    return None
+def calibration_image_captures(output_dir="CalibrationImages", num_images=20, camera_index=0, interval_sec= 1.5):
+    """Captura imagenes de calibracion y las guarda en output_dir."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Contar imagenes existentes para no sobrescribir
+    existing_images = []
+    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+        existing_images.extend(glob.glob(os.path.join(output_dir, ext))) 
+    next_index = len(existing_images) + 1 
+
+    cap = cv.VideoCapture(camera_index)
+    if not cap.isOpened():
+        print("No se pudo abrir la camara para capturar imagenes de calibracion")
+        return []
+
+    print(f"Capturando {num_images} imagenes en la carpeta: {output_dir}")
+    print("Mueve el tablero por diferentes posiciones y orientaciones")
+    print("Pulsa 'q' para cancelar")
+
+    saved_images = []
+    capture_count = 0
+    last_capture_time = 0.0
+
+    while capture_count < num_images:
+        ok, frame = cap.read()
+        if not ok:
+            print("No se pudo leer frame de la camara")
+            break
+
+        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        ret, corners = cv.findChessboardCorners(gray, (COLUMNAS, FILAS), None)
+
+        preview = frame.copy()
+        if ret:
+            cv.drawChessboardCorners(preview, (COLUMNAS, FILAS), corners, ret)
+
+            current_time = time.time()
+            if current_time - last_capture_time >= interval_sec:
+                capture_count += 1
+                file_name = os.path.join(output_dir, f"calibration_{next_index:02d}.jpg")
+                if cv.imwrite(file_name, frame):
+                    saved_images.append(file_name)
+                    last_capture_time = current_time
+                    next_index += 1
+                    print(f"Guardada {capture_count}/{num_images}: {file_name}")
+
+        cv.putText(
+            preview,
+            f"Capturas: {capture_count}/{num_images}",
+            (10, 30),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2,
+        )
+        cv.imshow("Captura de calibracion", preview)
+
+        if cv.waitKey(1) & 0xFF == ord("q"):
+            print("Captura cancelada por usuario")
+            break
+
+    cap.release()
+    cv.destroyAllWindows()
+
+    print(f"Captura finalizada. Imagenes guardadas: {len(saved_images)}")
+    return saved_images
+
+
+def clear_calibration_images(output_dir="CalibrationImages"):
+    """Elimina imagenes de calibracion de la carpeta indicada."""
+    patterns = ("*.jpg", "*.JPG", "*.png", "*.jpeg")
+    removed = 0
+
+    for pattern in patterns:
+        for file_path in glob.glob(os.path.join(output_dir, pattern)):
+            try:
+                os.remove(file_path)
+                removed += 1
+            except OSError as e:
+                print(f"No se pudo borrar {file_path}: {e}")
+
+    return removed
 
 
 def chessboard_calibration():
+    """Realiza la calibracion usando un patron de ajedrez y devuelve los parametros."""
     # Puntos 3D del patron (centrados para facilitar la proyeccion AR)
     objp = build_object_points(centered=True)
 
@@ -45,36 +129,23 @@ def chessboard_calibration():
     imgpoints = []
     image_size = None
 
-    # Buscar imagenes de calibracion en carpetas candidatas
-    carpetas_candidatas = [ "CalibracionPCDiego"]
+    # Usar carpeta dedicada para capturas de calibracion
+    carpeta_imagenes = "CalibrationImages"
+    os.makedirs(carpeta_imagenes, exist_ok=True)
+
     extensions = ["*.jpg", "*.JPG", "*.png", "*.jpeg"]
     images = []
-    carpeta_imagenes = None
-
-    for carpeta in carpetas_candidatas:
-        if not os.path.exists(carpeta):
-            continue
-
-        images_temp = []
-        for ext in extensions:
-            ruta_busqueda = os.path.join(carpeta, ext)
-            images_temp.extend(glob.glob(ruta_busqueda))
-
-        if images_temp:
-            carpeta_imagenes = carpeta
-            images = images_temp
-            break
-
-    if carpeta_imagenes is None:
-        print("No existe ninguna carpeta de calibracion valida")
-        return None, None, None, None, None
-
-    print(f"Se usaran {len(images)} imagenes de: {carpeta_imagenes}")
+    for ext in extensions:
+        ruta_busqueda = os.path.join(carpeta_imagenes, ext)
+        images.extend(glob.glob(ruta_busqueda))
 
     if len(images) == 0:
-        print("No se encontraron imagenes de calibracion. Abriendo camara para calibracion en vivo...")
-        calibration_image_captures()
-        return None, None, None, None, None
+        print("CalibrationImages esta vacia. Iniciando captura de 20 imagenes...")
+        images = calibration_image_captures(output_dir=carpeta_imagenes, num_images = 20)
+        if len(images) == 0:
+            return None, None, None, None, None
+
+    print(f"Se usaran {len(images)} imagenes de: {carpeta_imagenes}")
 
     for fname in images:
         img = cv.imread(fname)
@@ -82,14 +153,17 @@ def chessboard_calibration():
             print(f"Error leyendo {fname}")
             continue
 
-        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-        current_size = gray.shape[::-1]
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) # Convertir a escala de grises para findChessboardCorners
+        current_size = gray.shape[::-1] 
+
+        # Proteccion basica contra imagenes de tamaños diferentes, que pueden causar errores en calibracion
         if image_size is None:
             image_size = current_size
         elif image_size != current_size:
-            print(f"Se omite {fname}: tamano de imagen inconsistente")
+            print(f"Se omite {fname}: tamaño de imagen inconsistente")
             continue
 
+        # Buscar el patron de ajedrez en la imagen
         ret, corners = cv.findChessboardCorners(gray, (COLUMNAS, FILAS), None)
 
         if ret:
@@ -188,14 +262,13 @@ def live_projection(mtx, dist, objp, puntos_modelo):
                         if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
                             cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
 
-                cv.drawChessboardCorners(frame, (COLUMNAS, FILAS), corners2, ret_pattern)
             else:
-                patron_detectado = False # Activamos el ahorro de energía/frames
-                cv.putText(frame, "Buscando patron (Modo Ahorro)...", (10, 30), 
+                patron_detectado = False # Si no se detecta, entramos en modo ahorro de CPU
+                cv.putText(frame, "Buscando patron", (10, 30), 
                            cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
             # En los frames saltados, mantenemos el feedback visual
-            cv.putText(frame, "Buscando patron (Modo Ahorro)...", (10, 30), 
+            cv.putText(frame, "Buscando patron", (10, 30), 
                        cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         cv.imshow("Realidad Aumentada PCD", frame)
@@ -212,6 +285,36 @@ def main():
     print("\nRealizando calibracion con patron de ajedrez...")
     ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
 
+    # Si el error de reproyeccion es alto, intentamos capturar nuevas imagenes y recalibrar
+    reintentos = 0
+    while mtx is not None and ret > RMS_UMBRAL_ALTO and reintentos < MAX_REINTENTOS_RMS:
+        reintentos += 1
+        print(
+            f"\nAviso: error de reproyeccion alto ({ret:.6f} > {RMS_UMBRAL_ALTO:.3f})."
+        )
+        print(f"Reintento automatico {reintentos}/{MAX_REINTENTOS_RMS}")
+
+        borradas = clear_calibration_images(output_dir="CalibrationImages")
+        print(f"Se borraron {borradas} imagenes de CalibrationImages")
+
+        nuevas = calibration_image_captures(
+            output_dir="CalibrationImages",
+            num_images=CAPTURAS_REINTENTO,
+        )
+
+        if len(nuevas) == 0:
+            print("No se capturaron nuevas imagenes. No se puede repetir la calibracion")
+            break
+
+        print("Recalculando calibracion con las nuevas imagenes...")
+        ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+
+    if mtx is not None and ret > RMS_UMBRAL_ALTO:
+        print(
+            f"\nAdvertencia: el error de reproyeccion sigue alto ({ret:.6f}) tras los reintentos"
+        )
+
+    # Mostrar resultados de calibracion
     if mtx is not None:
         print("\nCalibracion exitosa")
         print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")

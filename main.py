@@ -26,6 +26,7 @@ RMS_UMBRAL_ALTO = 0.8
 CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
 CALIBRATION_DIR_CHESSBOARD = "CalibrationImagesChessboard"
+CALIBRATION_DIR_ARUCO = "CalibrationImagesAruco"
 CALIBRATION_DIR_CHARUCO = "CalibrationImagesCharuco"
 
 def build_object_points(centered=True):
@@ -142,10 +143,18 @@ def calibration_image_captures(
     next_index = len(existing_images) + 1 
 
     charuco_setup = None
+    aruco_detector = None
     if pattern_type == "charuco":
         charuco_setup = get_charuco_setup()
         if charuco_setup is None:
             return []
+    elif pattern_type == "aruco":
+        if not hasattr(cv, "aruco"):
+            print("OpenCV no incluye modulo aruco. Instala opencv-contrib-python")
+            return []
+        dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
+        detector_params = cv.aruco.DetectorParameters()
+        aruco_detector = cv.aruco.ArucoDetector(dictionary, detector_params)
 
     cap = cv.VideoCapture(camera_index)
     if not cap.isOpened():
@@ -176,6 +185,11 @@ def calibration_image_captures(
             if ret:
                 pattern_found = True
                 cv.drawChessboardCorners(preview, (CHESSBOARD_COLUMNAS,CHESSBOARD_FILAS), corners, ret)
+        elif pattern_type == "aruco":
+            marker_corners, marker_ids, _ = aruco_detector.detectMarkers(gray)
+            if marker_ids is not None and len(marker_ids) > 0:
+                pattern_found = True
+                cv.aruco.drawDetectedMarkers(preview, marker_corners, marker_ids)
         elif pattern_type == "charuco":
             charuco_corners, charuco_ids, marker_corners, marker_ids = detect_charuco(
                 gray, charuco_setup
@@ -321,8 +335,11 @@ def chessboard_calibration():
 def aruco_calibration():
     """Realiza la calibracion usando un unico marcador ArUco y devuelve los parametros."""
     print("\nIniciando calibracion con un unico marcador ArUco...")
-    
-    # Configuramos el detector (usamos diccionario 4x4 porque tu foto es de ese tipo)
+    if not hasattr(cv, "aruco"):
+        print("OpenCV no incluye modulo aruco. Instala opencv-contrib-python")
+        return None, None, None, None, None
+
+    # Configuramos el detector (usamos diccionario 4x4_250)
     dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
     detector_params = cv.aruco.DetectorParameters()
     detector = cv.aruco.ArucoDetector(dictionary, detector_params)
@@ -341,8 +358,7 @@ def aruco_calibration():
     all_img_points = []
     image_size = None
 
-    # Pon la carpeta donde tengas las fotos de este marcador individual
-    carpeta_imagenes = "Calibracion_Aruco_Diego" 
+    carpeta_imagenes = CALIBRATION_DIR_ARUCO
     os.makedirs(carpeta_imagenes, exist_ok=True)
 
     images = []
@@ -350,8 +366,14 @@ def aruco_calibration():
         images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
 
     if len(images) == 0:
-        print(f"Error: La carpeta '{carpeta_imagenes}' esta vacia.")
-        return None, None, None, None, None
+        print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+        images = calibration_image_captures(
+            output_dir=carpeta_imagenes,
+            num_images=20,
+            pattern_type="aruco",
+        )
+        if len(images) == 0:
+            return None, None, None, None, None
 
     print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
 
@@ -363,19 +385,25 @@ def aruco_calibration():
         gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
         current_size = gray.shape[::-1]
         if image_size is None:
-            image_size = gray.shape[::-1]
+            image_size = current_size
+        elif image_size != current_size:
+            print(f"Se omite {fname}: tamaño de imagen inconsistente")
+            continue
 
         # Detectar el marcador
-        corners, ids, rejected = detector.detectMarkers(gray)
+        corners, ids, _ = detector.detectMarkers(gray)
 
         if ids is not None and len(ids) > 0:
-            # Usamos el primer marcador que encuentre (corners[0])
-            # corners[0] tiene forma (1, 4, 2), extraemos las 4 esquinas 2D
-            esquinas_2d = corners[0][0]
-            
+            # Esta calibracion usa un unico patron de ArUco; tomamos un marcador por imagen.
+            esquinas_2d = np.asarray(corners[0][0], dtype=np.float32)
+
             all_obj_points.append(marker_3d)
             all_img_points.append(esquinas_2d)
-            print(f"Marcador detectado en {fname}")
+            marker_id = int(ids[0][0])
+            if len(ids) > 1:
+                print(f"Marcadores multiples en {fname}; se usa el marcador ID {marker_id}")
+            else:
+                print(f"Marcador ID {marker_id} detectado en {fname}")
         else:
             print(f"Descartada {fname}: no se detecto el marcador")
 
@@ -531,11 +559,26 @@ def load_pcd_model(ruta_pcd, escala=1.0):
 
 def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard"):
     charuco_setup = None
+    aruco_detector = None
+    marker_3d = None
+
     if calibration_type == "charuco":
         charuco_setup = get_charuco_setup()
         if charuco_setup is None:
             print("No se pudo inicializar ChArUco para la proyeccion en vivo")
             return
+    elif calibration_type == "aruco":
+        if not hasattr(cv, "aruco"):
+            print("No se pudo inicializar ArUco para la proyeccion en vivo")
+            return
+        dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
+        detector_params = cv.aruco.DetectorParameters()
+        aruco_detector = cv.aruco.ArucoDetector(dictionary, detector_params)
+
+        L = ARUCO_TAM_MARCADOR / 2.0
+        marker_3d = np.array(
+            [[-L, L, 0], [L, L, 0], [L, -L, 0], [-L, -L, 0]], dtype=np.float32
+        )
 
     cap = cv.VideoCapture(0)
     if not cap.isOpened():
@@ -544,143 +587,171 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
 
     print("Presiona 'q' para cerrar la proyeccion en vivo")
 
-    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
-    detector = cv.aruco.ArucoDetector(dictionary, cv.aruco.DetectorParameters())
-
-    # Las mismas 4 esquinas 3D que usamos para calibrar
-    L = ARUCO_TAM_MARCADOR / 2.0
-    marker_3d = np.array([
-        [-L,  L, 0],
-        [ L,  L, 0],
-        [ L, -L, 0],
-        [-L, -L, 0]
-    ], dtype=np.float32)
+    frame_count = 0
+    skip_rate = 6
+    patron_detectado = False
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
+        frame_count += 1
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-        # Detectar el marcador
-        corners, ids, rejected = detector.detectMarkers(gray)
-
-        if debe_buscar:
-            if calibration_type == "charuco":
-                board = charuco_setup["board"]
-                charuco_corners, charuco_ids, _, _ = detect_charuco(
-                    gray, charuco_setup
+        if calibration_type == "aruco":
+            marker_corners, marker_ids, _ = aruco_detector.detectMarkers(gray)
+            if marker_ids is not None and len(marker_ids) > 0:
+                patron_detectado = True
+                cv.putText(
+                    frame,
+                    f"Marcadores detectados: {len(marker_ids)}",
+                    (10, 30),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
                 )
 
-                if (
-                    charuco_corners is not None
-                    and charuco_ids is not None
-                    and len(charuco_corners) >= 4
-                ):
-                    patron_detectado = True
+                # Proyectar una instancia del modelo por cada marcador detectado.
+                for single_marker_corners in marker_corners:
+                    img_points = np.asarray(single_marker_corners[0], dtype=np.float32)
+                    ret_pnp, rvec, tvec = cv.solvePnP(marker_3d, img_points, mtx, dist)
 
-                    ret_pnp = False
-                    rvec, tvec = None, None
+                    if ret_pnp and puntos_modelo is not None:
+                        imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
+                        for pt in imgpts:
+                            x, y = int(pt[0][0]), int(pt[0][1])
+                            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                                cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+            else:
+                patron_detectado = False
+                cv.putText(
+                    frame,
+                    "Buscando marcador ArUco",
+                    (10, 30),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 0, 255),
+                    2,
+                )
+        else:
+            debe_buscar = patron_detectado or (frame_count % skip_rate == 0)
+            if debe_buscar:
+                if calibration_type == "charuco":
+                    board = charuco_setup["board"]
+                    charuco_corners, charuco_ids, _, _ = detect_charuco(
+                        gray, charuco_setup
+                    )
 
-                    try:
-                        obj_points, img_points = board.matchImagePoints(
-                            charuco_corners, charuco_ids
-                        )
-                        if (
-                            obj_points is not None
-                            and img_points is not None
-                            and len(obj_points) >= 4
-                        ):
-                            ret_pnp, rvec, tvec = cv.solvePnP(
-                                obj_points, img_points, mtx, dist
-                            )
-                    except Exception:
+                    if (
+                        charuco_corners is not None
+                        and charuco_ids is not None
+                        and len(charuco_corners) >= 4
+                    ):
+                        patron_detectado = True
+
                         ret_pnp = False
+                        rvec, tvec = None, None
 
-                    if not ret_pnp and hasattr(cv.aruco, "estimatePoseCharucoBoard"):
                         try:
-                            ret_pnp, rvec, tvec = cv.aruco.estimatePoseCharucoBoard(
-                                charuco_corners,
-                                charuco_ids,
-                                board,
-                                mtx,
-                                dist,
-                                None,
-                                None,
+                            obj_points, img_points = board.matchImagePoints(
+                                charuco_corners, charuco_ids
                             )
+                            if (
+                                obj_points is not None
+                                and img_points is not None
+                                and len(obj_points) >= 4
+                            ):
+                                ret_pnp, rvec, tvec = cv.solvePnP(
+                                    obj_points, img_points, mtx, dist
+                                )
                         except Exception:
                             ret_pnp = False
 
-                    if ret_pnp and puntos_modelo is not None:
-                        imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
-                        for pt in imgpts:
-                            x, y = int(pt[0][0]), int(pt[0][1])
-                            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-                                cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+                        if not ret_pnp and hasattr(cv.aruco, "estimatePoseCharucoBoard"):
+                            try:
+                                ret_pnp, rvec, tvec = cv.aruco.estimatePoseCharucoBoard(
+                                    charuco_corners,
+                                    charuco_ids,
+                                    board,
+                                    mtx,
+                                    dist,
+                                    None,
+                                    None,
+                                )
+                            except Exception:
+                                ret_pnp = False
+
+                        if ret_pnp and puntos_modelo is not None:
+                            imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
+                            for pt in imgpts:
+                                x, y = int(pt[0][0]), int(pt[0][1])
+                                if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                                    cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+                    else:
+                        patron_detectado = False
+                        cv.putText(
+                            frame,
+                            "Buscando patron ChArUco",
+                            (10, 30),
+                            cv.FONT_HERSHEY_SIMPLEX,
+                            0.7,
+                            (0, 0, 255),
+                            2,
+                        )
                 else:
-                    patron_detectado = False
-                    cv.putText(
-                        frame,
-                        "Buscando patron ChArUco",
-                        (10, 30),
-                        cv.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 0, 255),
-                        2,
+                    # CALIB_CB_FAST_CHECK hace una pasada rápida y aborta si no ve un tablero
+                    flags_opt = (
+                        cv.CALIB_CB_ADAPTIVE_THRESH
+                        + cv.CALIB_CB_FAST_CHECK
+                        + cv.CALIB_CB_NORMALIZE_IMAGE
                     )
+                    ret_pattern, corners = cv.findChessboardCorners(
+                        gray, (CHESSBOARD_COLUMNAS, CHESSBOARD_FILAS), flags=flags_opt
+                    )
+
+                    if ret_pattern:
+                        patron_detectado = True
+                        corners2 = cv.cornerSubPix(
+                            gray, corners, (11, 11), (-1, -1), TERM_CRITERIA
+                        )
+                        ret_pnp, rvec, tvec = cv.solvePnP(objp, corners2, mtx, dist)
+
+                        if ret_pnp and puntos_modelo is not None:
+                            imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
+                            for pt in imgpts:
+                                x, y = int(pt[0][0]), int(pt[0][1])
+                                if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                                    cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+                    else:
+                        patron_detectado = False
+                        cv.putText(
+                            frame,
+                            "Buscando patron",
+                            (10, 30),
+                            cv.FONT_HERSHEY_SIMPLEX,
+                            0.7,
+                            (0, 0, 255),
+                            2,
+                        )
             else:
-                # CALIB_CB_FAST_CHECK hace una pasada rápida y aborta si no ve un tablero
-                flags_opt = (
-                    cv.CALIB_CB_ADAPTIVE_THRESH
-                    + cv.CALIB_CB_FAST_CHECK
-                    + cv.CALIB_CB_NORMALIZE_IMAGE
-                )
-                ret_pattern, corners = cv.findChessboardCorners(
-                    gray, (CHESSBOARD_COLUMNAS,CHESSBOARD_FILAS), flags=flags_opt
-                )
-
-                if ret_pattern:
-                    patron_detectado = True
-                    corners2 = cv.cornerSubPix(
-                        gray, corners, (11, 11), (-1, -1), TERM_CRITERIA
-                    )
-                    ret_pnp, rvec, tvec = cv.solvePnP(objp, corners2, mtx, dist)
-
-                    if ret_pnp and puntos_modelo is not None:
-                        imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
-                        for pt in imgpts:
-                            x, y = int(pt[0][0]), int(pt[0][1])
-                            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-                                cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+                # En los frames saltados, mantenemos el feedback visual
+                if calibration_type == "charuco":
+                    label = "Buscando patron ChArUco"
                 else:
-                    patron_detectado = False
-                    cv.putText(
-                        frame,
-                        "Buscando patron",
-                        (10, 30),
-                        cv.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 0, 255),
-                        2,
-                    )
-        else:
-            # En los frames saltados, mantenemos el feedback visual
-            if calibration_type == "charuco":
-                label = "Buscando patron ChArUco"
-            else:
-                label = "Buscando patron"
-            cv.putText(
-                frame,
-                label,
-                (10, 30),
-                cv.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 255),
-                2,
-            )
+                    label = "Buscando patron"
+                cv.putText(
+                    frame,
+                    label,
+                    (10, 30),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 0, 255),
+                    2,
+                )
 
-        cv.imshow("Realidad Aumentada ArUco", frame)
+        cv.imshow("Realidad Aumentada", frame)
         if cv.waitKey(1) & 0xFF == ord("q"):
             break
 
@@ -705,6 +776,8 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
 
         if calibration_type == "chessboard":
             calibration_dir = CALIBRATION_DIR_CHESSBOARD
+        elif calibration_type == "aruco":
+            calibration_dir = CALIBRATION_DIR_ARUCO
         elif calibration_type == "charuco":
             calibration_dir = CALIBRATION_DIR_CHARUCO
         else:

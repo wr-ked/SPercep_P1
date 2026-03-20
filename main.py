@@ -155,28 +155,48 @@ def live_projection(mtx, dist, objp, puntos_modelo):
 
     print("Presiona 'q' para cerrar la proyeccion en vivo")
 
+    # --- VARIABLES PARA OPTIMIZACIÓN ---
+    frame_count = 0
+    skip_rate = 6  # Si no hay patrón, solo busca cada 6 frames (~5 veces por segundo)
+    patron_detectado = False 
+
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
+        frame_count += 1
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        ret_pattern, corners = cv.findChessboardCorners(gray, (COLUMNAS, FILAS), None)
 
-        if ret_pattern:
-            corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM_CRITERIA)
-            ret_pnp, rvec, tvec = cv.solvePnP(objp, corners2, mtx, dist)
+        # Solo buscamos si el patrón estaba presente o si toca por el contador de saltos
+        debe_buscar = patron_detectado or (frame_count % skip_rate == 0)
 
-            if ret_pnp and puntos_modelo is not None:
-                imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
-                for pt in imgpts:
-                    x, y = int(pt[0][0]), int(pt[0][1])
-                    if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-                        cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+        if debe_buscar:
+            # CALIB_CB_FAST_CHECK hace una pasada rápida y aborta si no ve un tablero
+            flags_opt = cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_FAST_CHECK + cv.CALIB_CB_NORMALIZE_IMAGE
+            ret_pattern, corners = cv.findChessboardCorners(gray, (COLUMNAS, FILAS), flags=flags_opt)
 
-            cv.drawChessboardCorners(frame, (COLUMNAS, FILAS), corners2, ret_pattern)
+            if ret_pattern:
+                patron_detectado = True # Mantenemos FPS altos
+                corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM_CRITERIA)
+                ret_pnp, rvec, tvec = cv.solvePnP(objp, corners2, mtx, dist)
+
+                if ret_pnp and puntos_modelo is not None:
+                    imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
+                    for pt in imgpts:
+                        x, y = int(pt[0][0]), int(pt[0][1])
+                        if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+                            cv.circle(frame, (x, y), 2, (0, 0, 255), -1)
+
+                cv.drawChessboardCorners(frame, (COLUMNAS, FILAS), corners2, ret_pattern)
+            else:
+                patron_detectado = False # Activamos el ahorro de energía/frames
+                cv.putText(frame, "Buscando patron (Modo Ahorro)...", (10, 30), 
+                           cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
-            cv.putText(frame, "Buscando patron...", (10, 30), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            # En los frames saltados, mantenemos el feedback visual
+            cv.putText(frame, "Buscando patron (Modo Ahorro)...", (10, 30), 
+                       cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         cv.imshow("Realidad Aumentada PCD", frame)
         if cv.waitKey(1) & 0xFF == ord("q"):

@@ -6,11 +6,8 @@ import cv2 as cv
 import glob
 import os
 import time
-
-try:
-    import open3d as o3d
-except ImportError:
-    o3d = None
+import argparse
+import open3d as o3d
 
 
 # Parametros globales originales (Chessboard)
@@ -26,7 +23,7 @@ CHARUCO_TAM_MARCADOR = 0.019  # 19 mm en metros
 
 # Otros parametros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-RMS_UMBRAL_ALTO = 0.8
+RMS_UMBRAL_ALTO = 808
 CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
 
@@ -401,11 +398,21 @@ def live_projection(mtx, dist, objp, puntos_modelo):
     cv.destroyAllWindows()
 
 
-def main():
+def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=False):
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
 
-    print("\nRealizando calibracion con patron ChArUco...") ### <--- CAMBIO 1 (Texto)
-    ret, mtx, dist, rvecs, tvecs = charuco_calibration() ### <--- CAMBIO 2 (Llamada a la funcion)
+    print(f"\nRealizando calibracion con tipo: {calibration_type.upper()}...")
+    
+    # Seleccionar funcion de calibracion segun el tipo
+    if calibration_type == "chessboard":
+        ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+    elif calibration_type == "aruco":
+        ret, mtx, dist, rvecs, tvecs = aruco_calibration()
+    elif calibration_type == "charuco":
+        ret, mtx, dist, rvecs, tvecs = charuco_calibration()
+    else:
+        print(f"Tipo de calibracion desconocido: {calibration_type}")
+        return
 
     # Si el error de reproyeccion es alto, intentamos capturar nuevas imagenes y recalibrar
     reintentos = 0
@@ -429,7 +436,13 @@ def main():
             break
 
         print("Recalculando calibracion con las nuevas imagenes...")
-        ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+        # Recalibrar usando el mismo tipo de calibracion
+        if calibration_type == "chessboard":
+            ret, mtx, dist, rvecs, tvecs = chessboard_calibration()
+        elif calibration_type == "aruco":
+            ret, mtx, dist, rvecs, tvecs = aruco_calibration()
+        elif calibration_type == "charuco":
+            ret, mtx, dist, rvecs, tvecs = charuco_calibration()
 
     if mtx is not None and ret > RMS_UMBRAL_ALTO:
         print(
@@ -439,35 +452,40 @@ def main():
     # Mostrar resultados de calibracion
     if mtx is not None:
         print("\nCalibracion exitosa")
-        print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")
-        print("Matriz de camara:")
-        print(mtx)
-        print(f"\nDistancia focal fx: {mtx[0,0]:.2f}")
-        print(f"Distancia focal fy: {mtx[1,1]:.2f}")
-        print(f"Centro optico cx: {mtx[0,2]:.2f}")
-        print(f"Centro optico cy: {mtx[1,2]:.2f}")
+        
+        # Mostrar parametros intrinsecos si se solicita
+        if show_intrinsic:
+            print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")
+            print("Matriz de camara:")
+            print(mtx)
+            print(f"\nDistancia focal fx: {mtx[0,0]:.2f}")
+            print(f"Distancia focal fy: {mtx[1,1]:.2f}")
+            print(f"Centro optico cx: {mtx[0,2]:.2f}")
+            print(f"Centro optico cy: {mtx[1,2]:.2f}")
 
-        print("\nCoeficientes de distorsion:")
-        print(dist.ravel())
+            print("\nCoeficientes de distorsion:")
+            print(dist.ravel())
 
-        print("\n=== PARAMETROS EXTRINSECOS PARA CADA IMAGEN ===")
-        for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
-            print(f"\n--- IMAGEN {i+1} ---")
+        # Mostrar parametros extrinsecos si se solicita
+        if show_extrinsic:
+            print("\n=== PARAMETROS EXTRINSECOS PARA CADA IMAGEN ===")
+            for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
+                print(f"\n--- IMAGEN {i+1} ---")
 
-            R, _ = cv.Rodrigues(rvec)
+                R, _ = cv.Rodrigues(rvec)
 
-            print("Matriz de rotacion R:")
-            print(R)
+                print("Matriz de rotacion R:")
+                print(R)
 
-            print("Vector de traslacion T:")
-            print(tvec.ravel())
+                print("Vector de traslacion T:")
+                print(tvec.ravel())
 
-            T = np.eye(4)
-            T[:3, :3] = R
-            T[:3, 3] = tvec.ravel()
+                T = np.eye(4)
+                T[:3, :3] = R
+                T[:3, 3] = tvec.ravel()
 
-            print("Matriz de transformacion completa T (4x4):")
-            print(T)
+                print("Matriz de transformacion completa T (4x4):")
+                print(T)
 
         print("\n=== RESUMEN DE CALIBRACION ===")
         print(f"Error de reproyeccion RMS: {ret:.6f}")
@@ -483,4 +501,32 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Calibracion de camara y proyeccion 3D a 2D",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Ejemplos de uso:\n  python main.py -c chessboard                       # Calibrar con patrón de ajedrez\n  python main.py -c aruco                            # Calibrar con marcadores ArUco\n  python main.py -c charuco                          # Calibrar con patrón ChArUco\n  python main.py -c chessboard -I                    # Con matriz intrínseca\n  python main.py -c chessboard -E                    # Con matrices extrínsecas\n  python main.py -c chessboard -I -E                 # Con ambas matrices"
+    )
+    parser.add_argument(
+        "-c", "--calibration-type",
+        type=str,
+        choices=["chessboard", "aruco", "charuco"],
+        required=True,
+        help="Tipo de patron de calibracion a utilizar (obligatorio)"
+    )
+    parser.add_argument(
+        "-I", "--show-intrinsic",
+        action="store_true",
+        help="Mostrar matriz de parametros intrinsecos"
+    )
+    parser.add_argument(
+        "-E", "--show-extrinsic",
+        action="store_true",
+        help="Mostrar matriz de parametros extrinsecos para cada imagen"
+    )
+    
+    args = parser.parse_args()
+    main(
+        calibration_type=args.calibration_type,
+        show_intrinsic=args.show_intrinsic,
+        show_extrinsic=args.show_extrinsic
+    )

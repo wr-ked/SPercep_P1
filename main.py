@@ -1,5 +1,5 @@
 # Perception. Practice 1. Camera calibration and 3D to 2D projection
-# Authors: Hugo Villasan Atienza and Diego Lopez Salazar
+# Authors: Hugo Villasan Atienza y Diego Lopez Salazar
 
 import numpy as np
 import cv2 as cv
@@ -46,7 +46,7 @@ def chessboard_calibration():
     image_size = None
 
     # Buscar imagenes de calibracion en carpetas candidatas
-    carpetas_candidatas = ["Chess_Calibration_Images", "CalibracionPCDiego"]
+    carpetas_candidatas = [ "CalibracionPCDiego"]
     extensions = ["*.jpg", "*.JPG", "*.png", "*.jpeg"]
     images = []
     carpeta_imagenes = None
@@ -99,8 +99,8 @@ def chessboard_calibration():
             imgpoints.append(corners2)
 
             cv.drawChessboardCorners(img, (COLUMNAS, FILAS), corners2, ret)
-            cv.imshow("Calibracion", img)
-            cv.waitKey(500)
+            # cv.imshow("Calibracion", img)
+            # cv.waitKey(500)
         else:
             print(f"No se detecto el patron {COLUMNAS}x{FILAS} en {fname}")
 
@@ -231,7 +231,7 @@ def main():
         print("\nPreparando proyeccion en vivo...")
         objp = build_object_points(centered=True)
         escala_modelo = 0.05 * TAM_CUADRADO
-        puntos_pcd = load_pcd_model("ninetales_centrado.pcd", escala=escala_modelo)
+        puntos_pcd = load_pcd_model("ninetales_voxelizado.pcd", escala=escala_modelo)
         live_projection(mtx, dist, objp, puntos_pcd)
     else:
         print("No se puede continuar sin calibracion valida")

@@ -15,14 +15,14 @@ def chessboard_calibration():
     # Dimensiones del patrón de ajedrez
     filas = 9
     columnas = 6
-    tam_cuadrado = 0.02 # centímetros, tamaño real de cada cuadrado del patrón
+    tam_cuadrado = 0.02 # metros, tamaño real de cada cuadrado del patrón
 
     # Criterio de terminación
     termcriteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)  # 
     
     # Preparar puntos de objeto.
     objp = np.zeros((filas*columnas, 3), np.float32)
-    objp[:,:2] = np.mgrid[0:filas, 0:columnas].T.reshape(-1,2) * tam_cuadrado  # Multiplicamos por el tamaño del cuadrado para obtener coordenadas reales en centímetros
+    objp[:,:2] = np.mgrid[0:columnas, 0:filas].T.reshape(-1,2) * tam_cuadrado  # Multiplicamos por el tamaño del cuadrado para obtener coordenadas reales en centímetros
 
     objpoints = [] # Puntos 3D
     imgpoints = [] # Puntos 2D
@@ -35,6 +35,10 @@ def chessboard_calibration():
     for ext in extensions:
         ruta_busqueda = os.path.join(carpeta_imagenes, ext)
         images.extend(glob.glob(ruta_busqueda))
+
+    if not os.path.exists(carpeta_imagenes):
+        print(f"La carpeta {carpeta_imagenes} no existe")
+        return None, None, None, None, None
 
     if len(images) == 0:
         print("No se encontraron imágenes de calibración. Abriendo cámara para calibración en vivo...")
@@ -51,8 +55,8 @@ def chessboard_calibration():
         gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
         image_size = gray.shape[::-1]
 
-        # Buscar esquinas con las dimensiones correctas (9x6)
-        ret, corners = cv.findChessboardCorners(gray, (filas, columnas), None)
+        # Buscar esquinas con las dimensiones correctas (6X9)
+        ret, corners = cv.findChessboardCorners(gray, (columnas, filas), None)
         
         if ret == True:
             # Si encuentra el patrón, lo añadimos a la lista de puntos de objeto
@@ -64,7 +68,7 @@ def chessboard_calibration():
             imgpoints.append(corners2)
 
             # Dibujar esquinas detectadas en la imagen
-            cv.drawChessboardCorners(img, (filas, columnas), corners2, ret)
+            cv.drawChessboardCorners(img, (columnas, filas), corners2, ret)
             cv.imshow('Calibración', img)
             cv.waitKey(500)  # Esperar medio segundo para mostrar la imagen
         else:
@@ -80,7 +84,6 @@ def chessboard_calibration():
     ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, image_size, None, None)
     return ret, mtx, dist, rvecs, tvecs
 
-    # VERBOSE
     
 
 def aruco_calibration():
@@ -93,7 +96,7 @@ def live_projection():
     return None
 
 def main():
-    print("=== PRÁCTICA 1: CALIBRACIÓN Y REALIDAD AUMENTADA ===")
+    print("=== PRÁCTICA 1: CALIBRACIÓN Y PROYECCIÓN ===")
     
     # Ejecutar calibración chessboard
     print("\nRealizando calibración con patrón de ajedrez...")

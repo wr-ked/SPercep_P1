@@ -131,7 +131,7 @@ def calibration_image_captures(output_dir="CalibrationImages",num_images=20,came
     os.makedirs(output_dir, exist_ok=True)
 
     next_index = 1
-    
+
     charuco_setup = None
     aruco_detector = None
     if pattern_type == "charuco":
@@ -568,6 +568,7 @@ def load_pcd_model(ruta_pcd, escala=1.0, calibration_type="chessboard"):
             
         else: # chessboard
             # Levantamos el modelo en el eje Z
+            altura_z = -0.05 
             pcd = copy.deepcopy(pcd).translate((0, 0, altura_z), relative=False)
 
         # Extraer los puntos finales para OpenCV

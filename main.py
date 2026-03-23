@@ -21,6 +21,7 @@ CHARUCO_COLUMNAS = 9
 CHARUCO_TAM_CUADRADO = 0.026 
 CHARUCO_TAM_MARCADOR = 0.019  
 ARUCO_TAM_MARCADOR = 0.10
+
 # Otros parametros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 RMS_UMBRAL_ALTO = 0.8
@@ -28,7 +29,7 @@ CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
 
 def build_object_points(centered=True):
-    """Genera los puntos 3D del tablero sobre."""
+    """Genera los puntos 3D del tablero de ajedrez."""
     objp = np.zeros((CHESSBOARD_FILAS * CHESSBOARD_COLUMNAS, 3), np.float32)
     grid = np.mgrid[0:CHESSBOARD_COLUMNAS, 0:CHESSBOARD_FILAS].T.reshape(-1, 2)
 
@@ -41,11 +42,11 @@ def build_object_points(centered=True):
 
 
 def get_charuco_setup():
-
+    """Inicializa el tablero ChArUco"""
     if not hasattr(cv, "aruco"):
         print("No es posible cargar el modelo Aruco")
         return None
-
+    
     try:
         dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
         board = cv.aruco.CharucoBoard(
@@ -639,7 +640,8 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
 
         frame_count += 1
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-
+        
+        # arUco
         if calibration_type == "aruco":
             marker_corners, marker_ids, _ = aruco_detector.detectMarkers(gray)
             if marker_ids is not None and len(marker_ids) > 0:
@@ -675,8 +677,9 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                     (0, 0, 255),
                     2,
                 )
+        # Charuco
         else:
-            debe_buscar = patron_detectado or (frame_count % skip_rate == 0)
+            debe_buscar = patron_detectado or (frame_count % skip_rate == 0) # Solo buscamos el patron cada 'skip_rate' frames o si no se ha detectado en el frame anterior, para mejorar rendimiento 
             if debe_buscar:
                 if calibration_type == "charuco":
                     board = charuco_setup["board"]
@@ -693,7 +696,7 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
 
                         ret_pnp = False
                         rvec, tvec = None, None
-
+                        # Primero intentamos con el solvePnP tradicional usando los puntos 3D-2D que nos da el tablero ChArUco, que suele ser mas rapido y funciona bien en la mayoria de casos
                         try:
                             obj_points, img_points = board.matchImagePoints(
                                 charuco_corners, charuco_ids
@@ -708,7 +711,7 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                                 )
                         except Exception:
                             ret_pnp = False
-
+                        # En caso de que falle el solvePnP tradicional, intentamos con la funcion especifica de ChArUco (disponible en OpenCV 4.7+), que a veces es mas robusta para este tipo de tableros
                         if not ret_pnp and hasattr(cv.aruco, "estimatePoseCharucoBoard"):
                             try:
                                 ret_pnp, rvec, tvec = cv.aruco.estimatePoseCharucoBoard(
@@ -723,6 +726,7 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                             except Exception:
                                 ret_pnp = False
 
+                        # Si se obtuvo una pose valida, proyectamos los puntos del modelo PCD sobre la imagen
                         if ret_pnp and puntos_modelo is not None:
                             imgpts, _ = cv.projectPoints(puntos_modelo, rvec, tvec, mtx, dist)
                             for pt in imgpts:
@@ -733,13 +737,14 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                         patron_detectado = False
                         cv.putText(
                             frame,
-                            "Buscando patron ChArUco",
+                            "Buscando patron",
                             (10, 30),
                             cv.FONT_HERSHEY_SIMPLEX,
                             0.7,
                             (0, 0, 255),
                             2,
                         )
+                # Chessboard
                 else:
                     flags_opt = (
                         cv.CALIB_CB_ADAPTIVE_THRESH
@@ -775,10 +780,7 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                             2,
                         )
             else:
-                if calibration_type == "charuco":
-                    label = "Buscando patron ChArUco"
-                else:
-                    label = "Buscando patron"
+                label = "Buscando patron"
                 cv.putText(
                     frame,
                     label,

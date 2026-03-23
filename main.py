@@ -7,6 +7,7 @@ import glob
 import os
 import time
 import argparse
+import copy  # Añadido para poder usar copy.deepcopy() según los apuntes
 import open3d as o3d
 
 
@@ -25,9 +26,6 @@ TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 RMS_UMBRAL_ALTO = 0.8
 CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
-CALIBRATION_DIR_CHESSBOARD = "CalibrationImagesChessboard"
-CALIBRATION_DIR_ARUCO = "CalibrationImagesAruco"
-CALIBRATION_DIR_CHARUCO = "CalibrationImagesCharuco"
 
 def build_object_points(centered=True):
     """Genera los puntos 3D del tablero sobre Z=0."""
@@ -114,20 +112,20 @@ def detect_charuco(gray, charuco_setup):
     return charuco_corners, charuco_ids, marker_corners, marker_ids
 
 
-def run_calibration(calibration_type):
+def run_calibration(calibration_type, custom_dir=None, force_capture=False):
     if calibration_type == "chessboard":
-        return chessboard_calibration()
+        return chessboard_calibration(custom_dir, force_capture)
     if calibration_type == "aruco":
-        return aruco_calibration()
+        return aruco_calibration(custom_dir, force_capture)
     if calibration_type == "charuco":
-        return charuco_calibration()
+        return charuco_calibration(custom_dir, force_capture)
 
     print(f"Tipo de calibracion desconocido: {calibration_type}")
     return None, None, None, None, None
 
 
 def calibration_image_captures(
-    output_dir=CALIBRATION_DIR_CHESSBOARD,
+    output_dir="CalibrationImages",
     num_images=20,
     camera_index=0,
     interval_sec=1.5,
@@ -136,7 +134,6 @@ def calibration_image_captures(
     """Captura imagenes de calibracion y las guarda en output_dir."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # Contar imagenes existentes para no sobrescribir
     existing_images = []
     for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
         existing_images.extend(glob.glob(os.path.join(output_dir, ext))) 
@@ -244,8 +241,7 @@ def calibration_image_captures(
     return saved_images
 
 
-def clear_calibration_images(output_dir=CALIBRATION_DIR_CHESSBOARD):
-    """Elimina imagenes de calibracion de la carpeta indicada."""
+def clear_calibration_images(output_dir="CalibrationImages"):
     patterns = ("*.jpg", "*.JPG", "*.png", "*.jpeg")
     removed = 0
 
@@ -260,27 +256,19 @@ def clear_calibration_images(output_dir=CALIBRATION_DIR_CHESSBOARD):
     return removed
 
 
-def chessboard_calibration():
-    """Realiza la calibracion usando un patron de ajedrez y devuelve los parametros."""
-    # Puntos 3D del patron (centrados para facilitar la proyeccion AR)
+def chessboard_calibration(custom_dir=None, force_capture=False):
     objp = build_object_points(centered=True)
-
     objpoints = []
     imgpoints = []
     image_size = None
 
-    # Usar carpeta dedicada para capturas de calibracion
-    carpeta_imagenes = CALIBRATION_DIR_CHESSBOARD
+    carpeta_imagenes = custom_dir if custom_dir else "chessboard"
     os.makedirs(carpeta_imagenes, exist_ok=True)
 
-    extensions = ["*.jpg", "*.JPG", "*.png", "*.jpeg"]
     images = []
-    for ext in extensions:
-        ruta_busqueda = os.path.join(carpeta_imagenes, ext)
-        images.extend(glob.glob(ruta_busqueda))
-
-    if len(images) == 0:
-        print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+    
+    if force_capture:
+        print(f"Iniciando captura de 20 imagenes en: {carpeta_imagenes}")
         images = calibration_image_captures(
             output_dir=carpeta_imagenes,
             num_images=20,
@@ -288,26 +276,38 @@ def chessboard_calibration():
         )
         if len(images) == 0:
             return None, None, None, None, None
+    else:
+        extensions = ["*.jpg", "*.JPG", "*.png", "*.jpeg"]
+        for ext in extensions:
+            ruta_busqueda = os.path.join(carpeta_imagenes, ext)
+            images.extend(glob.glob(ruta_busqueda))
+
+        if len(images) == 0:
+            print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+            images = calibration_image_captures(
+                output_dir=carpeta_imagenes,
+                num_images=20,
+                pattern_type="chessboard",
+            )
+            if len(images) == 0:
+                return None, None, None, None, None
 
     print(f"Se usaran {len(images)} imagenes de: {carpeta_imagenes}")
 
     for fname in images:
         img = cv.imread(fname)
         if img is None:
-            print(f"Error leyendo {fname}")
             continue
 
-        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) # Convertir a escala de grises para findChessboardCorners
+        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY) 
         current_size = gray.shape[::-1] 
 
-        # Proteccion basica contra imagenes de tamaños diferentes, que pueden causar errores en calibracion
         if image_size is None:
             image_size = current_size
         elif image_size != current_size:
             print(f"Se omite {fname}: tamaño de imagen inconsistente")
             continue
 
-        # Buscar el patron de ajedrez en la imagen
         ret, corners = cv.findChessboardCorners(gray, (CHESSBOARD_COLUMNAS,CHESSBOARD_FILAS), None)
 
         if ret:
@@ -315,10 +315,7 @@ def chessboard_calibration():
             objpoints.append(objp)
             corners2 = cv.cornerSubPix(gray, corners, (11, 11), (-1, -1), TERM_CRITERIA)
             imgpoints.append(corners2)
-
             cv.drawChessboardCorners(img, (CHESSBOARD_COLUMNAS,CHESSBOARD_FILAS), corners2, ret)
-            # cv.imshow("Calibracion", img)
-            # cv.waitKey(500)
         else:
             print(f"No se detecto el patron {CHESSBOARD_COLUMNAS}x{CHESSBOARD_FILAS} en {fname}")
 
@@ -332,20 +329,16 @@ def chessboard_calibration():
     return ret, mtx, dist, rvecs, tvecs
 
 
-def aruco_calibration():
-    """Realiza la calibracion usando un unico marcador ArUco y devuelve los parametros."""
+def aruco_calibration(custom_dir=None, force_capture=False):
     print("\nIniciando calibracion con un unico marcador ArUco...")
     if not hasattr(cv, "aruco"):
         print("OpenCV no incluye modulo aruco. Instala opencv-contrib-python")
         return None, None, None, None, None
 
-    # Configuramos el detector (usamos diccionario 4x4_250)
     dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
     detector_params = cv.aruco.DetectorParameters()
     detector = cv.aruco.ArucoDetector(dictionary, detector_params)
 
-    # Definimos las 4 esquinas 3D de un solo marcador centrado en el origen (0,0,0)
-    # Orden de OpenCV: Top-Left, Top-Right, Bottom-Right, Bottom-Left
     L = ARUCO_TAM_MARCADOR / 2.0
     marker_3d = np.array([
         [-L,  L, 0],
@@ -358,15 +351,13 @@ def aruco_calibration():
     all_img_points = []
     image_size = None
 
-    carpeta_imagenes = CALIBRATION_DIR_ARUCO
+    carpeta_imagenes = custom_dir if custom_dir else "aruco"
     os.makedirs(carpeta_imagenes, exist_ok=True)
 
     images = []
-    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
-        images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
-
-    if len(images) == 0:
-        print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+    
+    if force_capture:
+        print(f"Iniciando captura de 20 imagenes en: {carpeta_imagenes}")
         images = calibration_image_captures(
             output_dir=carpeta_imagenes,
             num_images=20,
@@ -374,6 +365,19 @@ def aruco_calibration():
         )
         if len(images) == 0:
             return None, None, None, None, None
+    else:
+        for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+            images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
+
+        if len(images) == 0:
+            print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+            images = calibration_image_captures(
+                output_dir=carpeta_imagenes,
+                num_images=20,
+                pattern_type="aruco",
+            )
+            if len(images) == 0:
+                return None, None, None, None, None
 
     print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
 
@@ -390,13 +394,10 @@ def aruco_calibration():
             print(f"Se omite {fname}: tamaño de imagen inconsistente")
             continue
 
-        # Detectar el marcador
         corners, ids, _ = detector.detectMarkers(gray)
 
         if ids is not None and len(ids) > 0:
-            # Esta calibracion usa un unico patron de ArUco; tomamos un marcador por imagen.
             esquinas_2d = np.asarray(corners[0][0], dtype=np.float32)
-
             all_obj_points.append(marker_3d)
             all_img_points.append(esquinas_2d)
             marker_id = int(ids[0][0])
@@ -421,8 +422,7 @@ def aruco_calibration():
         print(f"Error durante el calculo: {e}")
         return None, None, None, None, None
     
-def charuco_calibration():
-    """Realiza la calibracion usando un tablero ChArUco desde una carpeta y devuelve los parametros."""
+def charuco_calibration(custom_dir=None, force_capture=False):
     print("\nIniciando calibracion con ChArUco...")
 
     charuco_setup = get_charuco_setup()
@@ -438,15 +438,13 @@ def charuco_calibration():
     all_img_points = []
     image_size = None
 
-    carpeta_imagenes = CALIBRATION_DIR_CHARUCO
+    carpeta_imagenes = custom_dir if custom_dir else "charuco"
     os.makedirs(carpeta_imagenes, exist_ok=True)
 
     images = []
-    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
-        images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
-
-    if len(images) == 0:
-        print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+    
+    if force_capture:
+        print(f"Iniciando captura de 20 imagenes en: {carpeta_imagenes}")
         images = calibration_image_captures(
             output_dir=carpeta_imagenes,
             num_images=20,
@@ -454,6 +452,19 @@ def charuco_calibration():
         )
         if len(images) == 0:
             return None, None, None, None, None
+    else:
+        for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+            images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
+
+        if len(images) == 0:
+            print(f"{carpeta_imagenes} esta vacia. Iniciando captura de 20 imagenes...")
+            images = calibration_image_captures(
+                output_dir=carpeta_imagenes,
+                num_images=20,
+                pattern_type="charuco",
+            )
+            if len(images) == 0:
+                return None, None, None, None, None
 
     print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
 
@@ -473,10 +484,6 @@ def charuco_calibration():
         charuco_corners, charuco_ids, _, marker_ids = detect_charuco(gray, charuco_setup)
 
         if charuco_corners is None or charuco_ids is None or len(charuco_corners) < 4:
-            if marker_ids is None or len(marker_ids) == 0:
-                print(f"Descartada {fname}: no se detecto ningun marcador")
-            else:
-                print(f"Descartada {fname}: no hay suficientes esquinas ChArUco")
             continue
 
         all_charuco_corners.append(charuco_corners)
@@ -490,7 +497,6 @@ def charuco_calibration():
                 or len(obj_points) < 4
                 or len(img_points) < 4
             ):
-                print(f"Descartada {fname}: no se pudieron emparejar puntos 2D/3D")
                 continue
             all_obj_points.append(obj_points)
             all_img_points.append(img_points)
@@ -501,22 +507,17 @@ def charuco_calibration():
         print("No se encontraron tableros validos en ninguna de las imagenes proporcionadas.")
         return None, None, None, None, None
 
-    # 3. Calibrar la camara
     print("\nCalculando parametros de calibracion...")
     try:
         if not old_api:
             if len(all_obj_points) == 0 or len(all_img_points) == 0 or image_size is None:
-                print("No hay suficientes puntos validos para calibrar con ChArUco")
                 return None, None, None, None, None
-            # Calibracion estandar de OpenCV usando los puntos extraidos del tablero
             ret, mtx, dist, rvecs, tvecs = cv.calibrateCamera(
                 all_obj_points, all_img_points, image_size, None, None
             )
         else:
             if image_size is None:
-                print("No se pudo determinar el tamaño de imagen para calibrar")
                 return None, None, None, None, None
-            # Funcion deprecada en versiones nuevas, pero necesaria en las antiguas
             ret, mtx, dist, rvecs, tvecs = cv.aruco.calibrateCameraCharuco(
                 charucoCorners=all_charuco_corners,
                 charucoIds=all_charuco_ids,
@@ -532,8 +533,8 @@ def charuco_calibration():
         return None, None, None, None, None
 
 
-def load_pcd_model(ruta_pcd, escala=1.0):
-    """Carga una nube de puntos PCD como array float32 para OpenCV."""
+def load_pcd_model(ruta_pcd, escala=1.0, calibration_type="chessboard"):
+    """Carga una nube de puntos PCD y aplica transformaciones usando Open3D."""
     if o3d is None:
         print("open3d no esta instalado; se omite carga de modelo PCD")
         return None
@@ -543,17 +544,50 @@ def load_pcd_model(ruta_pcd, escala=1.0):
         return None
 
     try:
-        pcd = o3d.io.read_point_cloud(ruta_pcd)
+        pcd = o3d.io.read_point_cloud(ruta_pcd) 
+        
+        # 1. Escalar el modelo multiplicando sus puntos
         puntos_3d = np.asarray(pcd.points)
         if puntos_3d.size == 0:
             print(f"El archivo PCD no contiene puntos: {ruta_pcd}")
             return None
+            
+        pcd.points = o3d.utility.Vector3dVector(np.float32(puntos_3d * escala))
+        
+        # ====================================================================
+        # AQUI ESTA EL PARAMETRO QUE DEBES VARIAR PARA AJUSTAR LA ALTURA
+        # Empieza probando con 0.02 o 0.05. 
+        # Si sigue hundido, hazlo más grande. Si flota mucho, hazlo más pequeño.
+        altura_z = -0.05 
+        # ====================================================================
 
-        puntos_3d = np.float32(puntos_3d * escala)
-        print(f"Modelo cargado correctamente con {len(puntos_3d)} puntos")
-        return puntos_3d
+        if calibration_type == "charuco":
+            offset_x = (CHARUCO_COLUMNAS * CHARUCO_TAM_CUADRADO) / 2.0
+            offset_y = (CHARUCO_FILAS * CHARUCO_TAM_CUADRADO) / 2.0
+            
+            # Usamos relative=False como en los apuntes para fijar el centro exacto
+            pcd = copy.deepcopy(pcd).translate((offset_x, offset_y, altura_z), relative=False)
+            
+        elif calibration_type == "aruco":
+            # 1º Centramos temporalmente en 0,0,0 para que rote bien sobre su eje
+            pcd_rot = copy.deepcopy(pcd).translate((0, 0, 0), relative=False)
+            matriz_rot = pcd_rot.get_rotation_matrix_from_xyz((np.pi, 0, 0)) 
+            pcd_rot.rotate(matriz_rot, center=(0, 0, 0))
+            
+            # 2º Una vez dada la vuelta, lo levantamos en el eje Z
+            pcd = copy.deepcopy(pcd_rot).translate((0, 0, altura_z), relative=False)
+            
+        else: # chessboard
+            # Levantamos el modelo en el eje Z
+            pcd = copy.deepcopy(pcd).translate((0, 0, altura_z), relative=False)
+
+        # Extraer los puntos finales para OpenCV
+        puntos_3d_finales = np.float32(np.asarray(pcd.points))
+        print(f"Modelo transformado y cargado correctamente con {len(puntos_3d_finales)} puntos")
+        return puntos_3d_finales
+        
     except Exception as e:
-        print(f"No se pudo cargar el modelo PCD ({ruta_pcd}): {e}")
+        print(f"No se pudo cargar o transformar el modelo PCD ({ruta_pcd}): {e}")
         return None
 
 
@@ -613,7 +647,6 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                     2,
                 )
 
-                # Proyectar una instancia del modelo por cada marcador detectado.
                 for single_marker_corners in marker_corners:
                     img_points = np.asarray(single_marker_corners[0], dtype=np.float32)
                     ret_pnp, rvec, tvec = cv.solvePnP(marker_3d, img_points, mtx, dist)
@@ -701,7 +734,6 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                             2,
                         )
                 else:
-                    # CALIB_CB_FAST_CHECK hace una pasada rápida y aborta si no ve un tablero
                     flags_opt = (
                         cv.CALIB_CB_ADAPTIVE_THRESH
                         + cv.CALIB_CB_FAST_CHECK
@@ -736,7 +768,6 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
                             2,
                         )
             else:
-                # En los frames saltados, mantenemos el feedback visual
                 if calibration_type == "charuco":
                     label = "Buscando patron ChArUco"
                 else:
@@ -760,12 +791,45 @@ def live_projection(mtx, dist, objp, puntos_modelo, calibration_type="chessboard
 
 def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=False):
     print("=== PRACTICA 1: CALIBRACION Y PROYECCION ===")
-
-    print(f"\nRealizando calibracion con tipo: {calibration_type.upper()}...")
     
-    ret, mtx, dist, rvecs, tvecs = run_calibration(calibration_type)
+    print("\n¿Qué origen de imágenes deseas utilizar?")
+    print("1. Usar imágenes de una carpeta existente")
+    print("2. Capturar nuevas imágenes con la cámara ahora mismo")
+    
+    while True:
+        opcion = input("Elige una opción (1 o 2): ").strip()
+        if opcion in ['1', '2']:
+            break
+        print("Opción no válida. Por favor, introduce 1 o 2.")
+        
+    custom_dir = None
+    force_capture = (opcion == '2')
 
-    # Si el error de reproyeccion es alto, intentamos capturar nuevas imagenes y recalibrar
+    if not force_capture:
+        print(f"\nHas elegido usar imágenes existentes para {calibration_type}.")
+        print("¿Qué carpeta de fotos quieres usar?")
+        
+        opciones_carpeta = {
+            "1": f"{calibration_type}",
+            "2": f"{calibration_type}1"
+        }
+        
+        print(f"1. {opciones_carpeta['1']}")
+        print(f"2. {opciones_carpeta['2']}")
+        
+        while True:
+            sub_opcion = input("Elige una carpeta (1 o 2): ").strip()
+            if sub_opcion in ['1', '2']:
+                custom_dir = opciones_carpeta[sub_opcion]
+                break
+            print("Opción no válida. Por favor, introduce 1 o 2.")
+    else:
+        custom_dir = calibration_type
+        
+    print(f"\nRealizando calibracion con tipo: {calibration_type.upper()} en la carpeta '{custom_dir}'...")
+    
+    ret, mtx, dist, rvecs, tvecs = run_calibration(calibration_type, custom_dir, force_capture)
+
     reintentos = 0
     while mtx is not None and ret > RMS_UMBRAL_ALTO and reintentos < MAX_REINTENTOS_RMS:
         reintentos += 1
@@ -774,17 +838,7 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
         )
         print(f"Reintento automatico {reintentos}/{MAX_REINTENTOS_RMS}")
 
-        if calibration_type == "chessboard":
-            calibration_dir = CALIBRATION_DIR_CHESSBOARD
-        elif calibration_type == "aruco":
-            calibration_dir = CALIBRATION_DIR_ARUCO
-        elif calibration_type == "charuco":
-            calibration_dir = CALIBRATION_DIR_CHARUCO
-        else:
-            print(
-                "El reintento automatico de captura no esta implementado para este tipo de calibracion"
-            )
-            break
+        calibration_dir = custom_dir
 
         borradas = clear_calibration_images(output_dir=calibration_dir)
         print(f"Se borraron {borradas} imagenes de {calibration_dir}")
@@ -800,18 +854,16 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
             break
 
         print("Recalculando calibracion con las nuevas imagenes...")
-        ret, mtx, dist, rvecs, tvecs = run_calibration(calibration_type)
+        ret, mtx, dist, rvecs, tvecs = run_calibration(calibration_type, custom_dir, force_capture=False)
 
     if mtx is not None and ret > RMS_UMBRAL_ALTO:
         print(
             f"\nAdvertencia: el error de reproyeccion sigue alto ({ret:.6f}) tras los reintentos"
         )
 
-    # Mostrar resultados de calibracion
     if mtx is not None:
         print("\nCalibracion exitosa")
         
-        # Mostrar parametros intrinsecos si se solicita
         if show_intrinsic:
             print("\n=== MATRIZ DE PARAMETROS INTRINSECOS (M) ===")
             print("Matriz de camara:")
@@ -824,7 +876,6 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
             print("\nCoeficientes de distorsion:")
             print(dist.ravel())
 
-        # Mostrar parametros extrinsecos si se solicita
         if show_extrinsic:
             print("\n=== PARAMETROS EXTRINSECOS PARA CADA IMAGEN ===")
             for i, (rvec, tvec) in enumerate(zip(rvecs, tvecs)):
@@ -849,12 +900,16 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
         print(f"Error de reproyeccion RMS: {ret:.6f}")
         print(f"Imagenes utilizadas: {len(rvecs)}")
         print("\nPreparando proyeccion en vivo...")
+        
         if calibration_type == "chessboard":
             objp = build_object_points(centered=True)
         else:
             objp = None
+            
         escala_modelo = 0.05 * TAM_CUADRADO
-        puntos_pcd = load_pcd_model("ninetales_voxelizado.pcd", escala=escala_modelo)
+        
+        puntos_pcd = load_pcd_model("ninetales_voxelizado.pcd", escala=escala_modelo, calibration_type=calibration_type)
+        
         live_projection(
             mtx,
             dist,

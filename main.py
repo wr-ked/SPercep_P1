@@ -28,7 +28,7 @@ CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
 
 def build_object_points(centered=True):
-    """Genera los puntos 3D del tablero sobre ."""
+    """Genera los puntos 3D del tablero sobre."""
     objp = np.zeros((CHESSBOARD_FILAS * CHESSBOARD_COLUMNAS, 3), np.float32)
     grid = np.mgrid[0:CHESSBOARD_COLUMNAS, 0:CHESSBOARD_FILAS].T.reshape(-1, 2)
 
@@ -113,6 +113,7 @@ def detect_charuco(gray, charuco_setup):
 
 
 def run_calibration(calibration_type, custom_dir=None, force_capture=False):
+    """Ejecuta el proceso de calibracion segun el tipo especificado."""
     if calibration_type == "chessboard":
         return chessboard_calibration(custom_dir, force_capture)
     if calibration_type == "aruco":
@@ -235,6 +236,7 @@ def calibration_image_captures(output_dir="CalibrationImages",num_images=20,came
 
 
 def clear_calibration_images(output_dir="CalibrationImages"):
+    """Elimina imagenes de calibracion previas en output_dir."""
     patterns = ("*.jpg", "*.png", "*.jpeg")
     removed = 0
 
@@ -250,6 +252,7 @@ def clear_calibration_images(output_dir="CalibrationImages"):
 
 
 def chessboard_calibration(custom_dir=None, force_capture=False):
+    """Ejecuta calibracion usando un patron tablero de ajedrez."""
     objp = build_object_points(centered=True)
     objpoints = []
     imgpoints = []
@@ -259,7 +262,8 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
     os.makedirs(carpeta_imagenes, exist_ok=True)
 
     images = []
-    
+
+    # Si force_capture es True, se ignoran las imagenes existentes y se inicia una nueva captura
     if force_capture:
         print(f"Iniciando captura de 20 imagenes en: {carpeta_imagenes}")
         images = calibration_image_captures(
@@ -269,6 +273,7 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
         )
         if len(images) == 0:
             return None, None, None, None, None
+    # Si no se fuerza la captura, se buscan imagenes existentes. Si no hay ninguna, entonces se inicia la captura
     else:
         extensions = ["*.jpg", "*.png", "*.jpeg"]
         for ext in extensions:
@@ -287,6 +292,7 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
 
     print(f"Se usaran {len(images)} imagenes de: {carpeta_imagenes}")
 
+    # Procesar cada imagen para detectar el patron y extraer puntos
     for fname in images:
         img = cv.imread(fname)
         if img is None:
@@ -303,6 +309,7 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
 
         ret, corners = cv.findChessboardCorners(gray, (CHESSBOARD_COLUMNAS,CHESSBOARD_FILAS), None)
 
+        # Si se encuentra el patron, se refinan las esquinas y se guardan los puntos 3D-2D para calibrar luego
         if ret:
             print(f"Patron encontrado en {fname}")
             objpoints.append(objp)
@@ -323,16 +330,20 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
 
 
 def aruco_calibration(custom_dir=None, force_capture=False):
+    """Ejecuta calibracion usando un unico marcador ArUco."""
+
     print("\nIniciando calibracion con un unico marcador ArUco...")
     if not hasattr(cv, "aruco"):
         print("OpenCV no incluye modulo aruco. Instala opencv-contrib-python")
         return None, None, None, None, None
 
-    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)
-    detector_params = cv.aruco.DetectorParameters()
-    detector = cv.aruco.ArucoDetector(dictionary, detector_params)
+    dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_4X4_250)    
+    detector_params = cv.aruco.DetectorParameters()     # Puedes ajustar parametros como minMarkerPerimeterRate, maxMarkerPerimeterRate, etc. si es necesario
+    detector = cv.aruco.ArucoDetector(dictionary, detector_params) 
 
     L = ARUCO_TAM_MARCADOR / 2.0
+
+    # Definimos las coordenadas 3D de las esquinas del marcador ArUco en su propio sistema de referencia (centro en el medio del marcador)
     marker_3d = np.array([
         [-L,  L, 0],
         [ L,  L, 0],
@@ -349,6 +360,7 @@ def aruco_calibration(custom_dir=None, force_capture=False):
 
     images = []
     
+    # Si force_capture es True, se ignoran las imagenes existentes y se inicia una nueva captura
     if force_capture:
         print(f"Iniciando captura de 20 imagenes en: {carpeta_imagenes}")
         images = calibration_image_captures(
@@ -358,6 +370,7 @@ def aruco_calibration(custom_dir=None, force_capture=False):
         )
         if len(images) == 0:
             return None, None, None, None, None
+    # Si no se fuerza la captura, se buscan imagenes existentes. Si no hay ninguna, entonces se inicia la captura
     else:
         for ext in ("*.jpg", "*.png", "*.jpeg"):
             images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
@@ -374,6 +387,7 @@ def aruco_calibration(custom_dir=None, force_capture=False):
 
     print(f"Se evaluaran {len(images)} imagenes de: {carpeta_imagenes}")
 
+    #  Procesar cada imagen para detectar el marcador y extraer puntos
     for fname in images:
         img = cv.imread(fname)
         if img is None:
@@ -386,9 +400,11 @@ def aruco_calibration(custom_dir=None, force_capture=False):
         elif image_size != current_size:
             print(f"Se omite {fname}: tamaño de imagen inconsistente")
             continue
-
+        
+        # Detectamos el marcador ArUco en la imageny extraemos sus esquinas 2D e ID
         corners, ids, _ = detector.detectMarkers(gray)
 
+        # Si se detecta al menos un marcador, se guardan sus esquinas 2D y las correspondientes esquinas 3D para calibrar luego
         if ids is not None and len(ids) > 0:
             esquinas_2d = np.asarray(corners[0][0], dtype=np.float32)
             all_obj_points.append(marker_3d)
@@ -416,6 +432,7 @@ def aruco_calibration(custom_dir=None, force_capture=False):
         return None, None, None, None, None
     
 def charuco_calibration(custom_dir=None, force_capture=False):
+    """Ejecuta calibracion usando un tablero ChArUco (combinacion de ArUco y chessboard)."""
     print("\nIniciando calibracion con ChArUco...")
 
     charuco_setup = get_charuco_setup()

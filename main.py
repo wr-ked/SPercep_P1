@@ -1,5 +1,5 @@
-# Perception. Practice 1. Camera calibration and 3D to 2D projection
-# Authors: Hugo Villasan Atienza y Diego Lopez Salazar
+#Percepcion.Practica1.Calibracion y proyeccion 3d en plano 2d
+#Hugo Villasan Atienza y Diego Lopez Salazar
 
 import numpy as np
 import cv2 as cv
@@ -7,19 +7,19 @@ import glob
 import os
 import time
 import argparse
-import copy  # Añadido para poder usar copy.deepcopy() según los apuntes
+import copy  
 import open3d as o3d
 
 
 # Parametros globales originales (Chessboard)
 CHESSBOARD_FILAS = 9
 CHESSBOARD_COLUMNAS = 6
-TAM_CUADRADO = 0.02  # metros
+TAM_CUADRADO = 0.02  
 
 CHARUCO_FILAS = 6
 CHARUCO_COLUMNAS = 9
-CHARUCO_TAM_CUADRADO = 0.026 # 26 mm en metros
-CHARUCO_TAM_MARCADOR = 0.019  # 19 mm en metros
+CHARUCO_TAM_CUADRADO = 0.026 
+CHARUCO_TAM_MARCADOR = 0.019  
 ARUCO_TAM_MARCADOR = 0.10
 # Otros parametros
 TERM_CRITERIA = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -28,7 +28,7 @@ CAPTURAS_REINTENTO = 20
 MAX_REINTENTOS_RMS = 3
 
 def build_object_points(centered=True):
-    """Genera los puntos 3D del tablero sobre Z=0."""
+    """Genera los puntos 3D del tablero sobre ."""
     objp = np.zeros((CHESSBOARD_FILAS * CHESSBOARD_COLUMNAS, 3), np.float32)
     grid = np.mgrid[0:CHESSBOARD_COLUMNAS, 0:CHESSBOARD_FILAS].T.reshape(-1, 2)
 
@@ -41,9 +41,9 @@ def build_object_points(centered=True):
 
 
 def get_charuco_setup():
-    """Crea y devuelve la configuracion de ChArUco compatible con API nueva y antigua."""
+
     if not hasattr(cv, "aruco"):
-        print("OpenCV no incluye modulo aruco. Instala opencv-contrib-python")
+        print("No es posible cargar el modelo Aruco")
         return None
 
     try:
@@ -124,21 +124,14 @@ def run_calibration(calibration_type, custom_dir=None, force_capture=False):
     return None, None, None, None, None
 
 
-def calibration_image_captures(
-    output_dir="CalibrationImages",
-    num_images=20,
-    camera_index=0,
-    interval_sec=1.5,
-    pattern_type="chessboard",
-):
+def calibration_image_captures(output_dir="CalibrationImages",num_images=20,camera_index=0,interval_sec=1.5,pattern_type="chessboard",):
     """Captura imagenes de calibracion y las guarda en output_dir."""
+    clear_calibration_images(output_dir)
+    
     os.makedirs(output_dir, exist_ok=True)
 
-    existing_images = []
-    for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
-        existing_images.extend(glob.glob(os.path.join(output_dir, ext))) 
-    next_index = len(existing_images) + 1 
-
+    next_index = 1
+    
     charuco_setup = None
     aruco_detector = None
     if pattern_type == "charuco":
@@ -242,7 +235,7 @@ def calibration_image_captures(
 
 
 def clear_calibration_images(output_dir="CalibrationImages"):
-    patterns = ("*.jpg", "*.JPG", "*.png", "*.jpeg")
+    patterns = ("*.jpg", "*.png", "*.jpeg")
     removed = 0
 
     for pattern in patterns:
@@ -277,7 +270,7 @@ def chessboard_calibration(custom_dir=None, force_capture=False):
         if len(images) == 0:
             return None, None, None, None, None
     else:
-        extensions = ["*.jpg", "*.JPG", "*.png", "*.jpeg"]
+        extensions = ["*.jpg", "*.png", "*.jpeg"]
         for ext in extensions:
             ruta_busqueda = os.path.join(carpeta_imagenes, ext)
             images.extend(glob.glob(ruta_busqueda))
@@ -366,7 +359,7 @@ def aruco_calibration(custom_dir=None, force_capture=False):
         if len(images) == 0:
             return None, None, None, None, None
     else:
-        for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+        for ext in ("*.jpg", "*.png", "*.jpeg"):
             images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
 
         if len(images) == 0:
@@ -453,7 +446,7 @@ def charuco_calibration(custom_dir=None, force_capture=False):
         if len(images) == 0:
             return None, None, None, None, None
     else:
-        for ext in ("*.jpg", "*.JPG", "*.png", "*.jpeg"):
+        for ext in ("*.jpg", "*.png", "*.jpeg"):
             images.extend(glob.glob(os.path.join(carpeta_imagenes, ext)))
 
         if len(images) == 0:
@@ -554,27 +547,23 @@ def load_pcd_model(ruta_pcd, escala=1.0, calibration_type="chessboard"):
             
         pcd.points = o3d.utility.Vector3dVector(np.float32(puntos_3d * escala))
         
-        # ====================================================================
-        # AQUI ESTA EL PARAMETRO QUE DEBES VARIAR PARA AJUSTAR LA ALTURA
-        # Empieza probando con 0.02 o 0.05. 
-        # Si sigue hundido, hazlo más grande. Si flota mucho, hazlo más pequeño.
-        altura_z = -0.05 
-        # ====================================================================
+        
 
         if calibration_type == "charuco":
+            altura_z = -0.05 
             offset_x = (CHARUCO_COLUMNAS * CHARUCO_TAM_CUADRADO) / 2.0
             offset_y = (CHARUCO_FILAS * CHARUCO_TAM_CUADRADO) / 2.0
             
-            # Usamos relative=False como en los apuntes para fijar el centro exacto
             pcd = copy.deepcopy(pcd).translate((offset_x, offset_y, altura_z), relative=False)
             
         elif calibration_type == "aruco":
-            # 1º Centramos temporalmente en 0,0,0 para que rote bien sobre su eje
+            altura_z = 0.05
+            # Centramos temporalmente en 0,0,0 para que rote bien sobre su eje
             pcd_rot = copy.deepcopy(pcd).translate((0, 0, 0), relative=False)
             matriz_rot = pcd_rot.get_rotation_matrix_from_xyz((np.pi, 0, 0)) 
             pcd_rot.rotate(matriz_rot, center=(0, 0, 0))
             
-            # 2º Una vez dada la vuelta, lo levantamos en el eje Z
+            #Una vez dada la vuelta, lo levantamos en el eje Z
             pcd = copy.deepcopy(pcd_rot).translate((0, 0, altura_z), relative=False)
             
         else: # chessboard
@@ -824,7 +813,7 @@ def main(calibration_type="chessboard", show_intrinsic=False, show_extrinsic=Fal
                 break
             print("Opción no válida. Por favor, introduce 1 o 2.")
     else:
-        custom_dir = calibration_type
+        custom_dir = "CalibrationImages"
         
     print(f"\nRealizando calibracion con tipo: {calibration_type.upper()} en la carpeta '{custom_dir}'...")
     
